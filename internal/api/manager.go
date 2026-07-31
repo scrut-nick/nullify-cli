@@ -2360,4 +2360,3 @@ func (c *Client) CreateManagerTrigger(ctx context.Context, in CreateManagerTrigg
 	}
 	return &out, nil
 }
-

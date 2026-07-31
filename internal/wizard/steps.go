@@ -12,7 +12,12 @@ import (
 	"github.com/nullify-platform/cli/internal/auth"
 	"github.com/nullify-platform/cli/internal/lib"
 	"github.com/nullify-platform/cli/internal/logger"
+	"github.com/nullify-platform/cli/internal/terminal"
 )
+
+func stdinIsTTY() bool {
+	return terminal.IsInteractive(os.Stdin)
+}
 
 // DomainStep checks if a valid host is configured and prompts the user if not.
 func DomainStep() Step {
@@ -23,6 +28,9 @@ func DomainStep() Step {
 			return err == nil && cfg.Host != ""
 		},
 		Execute: func(ctx context.Context) error {
+			if !stdinIsTTY() {
+				return fmt.Errorf("not a terminal; configure a host non-interactively with 'nullify auth login --host <your-instance>.nullify.ai'")
+			}
 			reader := bufio.NewReader(os.Stdin)
 			fmt.Print("  Enter your Nullify customer name (e.g., 'acme'): ")
 			input, err := reader.ReadString('\n')

@@ -345,4 +345,3 @@ type ModelsTriagedSCPMFinding struct {
 	RepoContextVersion string `json:"repoContextVersion"`
 	Triage *ModelsTriage `json:"triage,omitempty"`
 }
-

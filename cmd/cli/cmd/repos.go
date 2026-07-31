@@ -3,10 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/nullify-platform/cli/internal/api"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -15,26 +13,28 @@ var reposCmd = &cobra.Command{
 	Use:     "repos",
 	Short:   "List monitored repositories",
 	Example: "  nullify repos\n  nullify repos -o table",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		apiClient := getAPIClient()
+		authCtx, err := resolveCommandAuth(ctx)
+		if err != nil {
+			return err
+		}
+		apiClient := authCtx.APIClient()
 
 		result, err := apiClient.ListContextRepositories(ctx, api.ListContextRepositoriesInput{})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 
 		data, err := json.Marshal(result)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 		if err := output.Print(cmd, data); err != nil {
-			fmt.Fprintln(os.Stderr, string(data))
+			fmt.Fprintln(cmd.ErrOrStderr(), string(data))
 		}
+		return nil
 	},
 }
 

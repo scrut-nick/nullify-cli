@@ -1605,4 +1605,3 @@ func (c *Client) ListSecretsSensitivedataFindingsFindingIdUsers(ctx context.Cont
 	}
 	return &out, nil
 }
-

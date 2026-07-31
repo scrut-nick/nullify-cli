@@ -3,10 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 
 	"github.com/nullify-platform/cli/internal/api"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -22,40 +20,42 @@ var sbomGetCmd = &cobra.Command{
 	Short: "Get the SBOM for a repository",
 	Example: "  nullify sbom get --repository-id repo-123\n" +
 		"  nullify sbom get --repository-id repo-123 --project-id proj-456",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
 		repositoryID, _ := cmd.Flags().GetString("repository-id")
 		projectID, _ := cmd.Flags().GetString("project-id")
 
-		apiClient := getAPIClient()
+		authCtx, err := resolveCommandAuth(ctx)
+		if err != nil {
+			return err
+		}
+		apiClient := authCtx.APIClient()
 
 		var result any
-		var err error
+		var apiErr error
 		if projectID != "" {
-			result, err = apiClient.GetContextSbomsRepositoryRepositoryIdProjectProjectId(ctx, api.GetContextSbomsRepositoryRepositoryIdProjectProjectIdInput{
+			result, apiErr = apiClient.GetContextSbomsRepositoryRepositoryIdProjectProjectId(ctx, api.GetContextSbomsRepositoryRepositoryIdProjectProjectIdInput{
 				RepositoryID: repositoryID,
 				ProjectID:    projectID,
 			})
 		} else {
-			result, err = apiClient.ListContextSbomsRepositoryRepositoryIdLatest(ctx, api.ListContextSbomsRepositoryRepositoryIdLatestInput{
+			result, apiErr = apiClient.ListContextSbomsRepositoryRepositoryIdLatest(ctx, api.ListContextSbomsRepositoryRepositoryIdLatestInput{
 				RepositoryID: repositoryID,
 			})
 		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if apiErr != nil {
+			return apiErr
 		}
 
 		data, err := json.Marshal(result)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 		if err := output.Print(cmd, data); err != nil {
-			fmt.Fprintln(os.Stderr, string(data))
+			fmt.Fprintln(cmd.ErrOrStderr(), string(data))
 		}
+		return nil
 	},
 }
 

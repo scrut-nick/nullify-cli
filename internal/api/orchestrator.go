@@ -390,4 +390,3 @@ func (c *Client) ListOrchestratorOnboardingStatus(ctx context.Context, in ListOr
 	}
 	return &out, nil
 }
-

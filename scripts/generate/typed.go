@@ -498,7 +498,8 @@ func writeModelsFile(modelsDir, bucketName string, names []string, r *modelRegis
 	}
 
 	fileName := bucketName + ".go"
-	if err := os.WriteFile(filepath.Join(modelsDir, fileName), []byte(sb.String()), 0644); err != nil {
+	content := strings.TrimRight(sb.String(), "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(modelsDir, fileName), []byte(content), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", fileName, err)
 		os.Exit(1)
 	}
@@ -603,7 +604,8 @@ func emitTypedClient(outputDir, service string, endpoints []Endpoint, r *modelRe
 		emitMethod(&sb, ep, r)
 	}
 
-	if err := os.WriteFile(filePath, []byte(sb.String()), 0644); err != nil {
+	content := strings.TrimRight(sb.String(), "\n") + "\n"
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		fmt.Fprintf(os.Stderr, "Error writing %s: %v\n", filePath, err)
 		os.Exit(1)
 	}
@@ -721,13 +723,13 @@ func (r *modelRegistry) queryParamGoType(p Parameter, prefix string) string {
 }
 
 // emitMethod writes the typed method body. It explicitly:
-//   1. Interpolates path params (url.PathEscape, format int64s).
-//   2. Builds url.Values from DefaultParams + url-tagged fields +
-//      embedded RequestScope.
-//   3. Marshals the body from json-tagged fields.
-//   4. Calls c.do.
-//   5. Decodes the response into a typed pointer (when an output schema is
-//      defined; otherwise returns ([]byte, error)).
+//  1. Interpolates path params (url.PathEscape, format int64s).
+//  2. Builds url.Values from DefaultParams + url-tagged fields +
+//     embedded RequestScope.
+//  3. Marshals the body from json-tagged fields.
+//  4. Calls c.do.
+//  5. Decodes the response into a typed pointer (when an output schema is
+//     defined; otherwise returns ([]byte, error)).
 func emitMethod(sb *strings.Builder, ep Endpoint, r *modelRegistry) {
 	outputType := ""
 	if ep.OutputSchema != "" {

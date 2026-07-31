@@ -349,4 +349,3 @@ type ModelsTriagedSASTFinding struct {
 	Triage *ModelsTriage `json:"triage,omitempty"`
 	TriagedCommitSha string `json:"triagedCommitSha"`
 }
-

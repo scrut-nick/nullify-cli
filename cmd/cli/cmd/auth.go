@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/nullify-platform/cli/internal/auth"
 	"github.com/nullify-platform/cli/internal/lib"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -25,11 +23,8 @@ var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Log in to Nullify",
 	Long:  "Authenticate with your Nullify instance. Opens your browser to log in with your identity provider.",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
-
-		// Wrap context with signal handling so Ctrl+C triggers graceful cancellation
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
@@ -43,23 +38,24 @@ var loginCmd = &cobra.Command{
 			}
 		}
 
-		// If still no host, prompt
+		// If still no host, prompt (only when running interactively).
 		if loginHost == "" {
+			if !stdinIsTTY() {
+				return fmt.Errorf("not a terminal; pass --host <your-instance>.nullify.ai")
+			}
 			fmt.Print("Enter your Nullify instance (e.g., acme.nullify.ai): ")
 			_, _ = fmt.Scanln(&loginHost)
 		}
 
 		sanitizedHost, err := lib.SanitizeNullifyHost(loginHost)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid host %q - must be in the format <your-instance>.nullify.ai\n", loginHost)
-			os.Exit(1)
+			return fmt.Errorf("invalid host %q - must be in the format <your-instance>.nullify.ai", loginHost)
 		}
 
-		err = auth.Login(ctx, sanitizedHost)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: login failed: %v\n", err)
-			os.Exit(1)
+		if err := auth.Login(ctx, sanitizedHost); err != nil {
+			return fmt.Errorf("login failed: %w", err)
 		}
+		return nil
 	},
 }
 
@@ -67,19 +63,18 @@ var logoutCmd = &cobra.Command{
 	Use:   "logout",
 	Short: "Log out of Nullify",
 	Long:  "Clear stored credentials for the current or specified host.",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
-
-		logoutHost := resolveHostForAuth(ctx)
-
-		err := auth.Logout(logoutHost)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logoutHost, err := resolveHostForAuth()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: logout failed: %v\n", err)
-			os.Exit(1)
+			return err
+		}
+
+		if err := auth.Logout(logoutHost); err != nil {
+			return fmt.Errorf("logout failed: %w", err)
 		}
 
 		fmt.Printf("Logged out from %s\n", logoutHost)
+		return nil
 	},
 }
 
@@ -87,16 +82,16 @@ var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show authentication status",
 	Long:  "Display the current authentication state including host, user, and token expiry.",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := auth.LoadConfig()
 		if err != nil {
 			fmt.Println("Not configured. Run 'nullify auth login --host <your-instance>.nullify.ai' to get started.")
-			return
+			return nil
 		}
 
 		if cfg.Host == "" {
 			fmt.Println("No host configured. Run 'nullify auth login --host <your-instance>.nullify.ai'")
-			return
+			return nil
 		}
 
 		fmt.Printf("Host: %s\n", cfg.Host)
@@ -104,13 +99,13 @@ var statusCmd = &cobra.Command{
 		creds, err := auth.LoadCredentials()
 		if err != nil {
 			fmt.Println("Status: not authenticated")
-			return
+			return nil
 		}
 
 		hostCreds, ok := creds[auth.CredentialKey(cfg.Host)]
 		if !ok {
 			fmt.Println("Status: not authenticated")
-			return
+			return nil
 		}
 
 		if hostCreds.ExpiresAt > 0 {
@@ -123,6 +118,7 @@ var statusCmd = &cobra.Command{
 		} else {
 			fmt.Println("Status: authenticated")
 		}
+		return nil
 	},
 }
 
@@ -130,19 +126,21 @@ var tokenCmd = &cobra.Command{
 	Use:   "token",
 	Short: "Print access token to stdout",
 	Long:  "Print the current access token. Useful for piping to other tools.",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		hostForToken := resolveHostForAuth(ctx)
+		hostForToken, err := resolveHostForAuth()
+		if err != nil {
+			return err
+		}
 
 		token, err := auth.GetValidToken(ctx, hostForToken)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 
 		fmt.Println(token)
+		return nil
 	},
 }
 
@@ -150,7 +148,7 @@ var switchCmd = &cobra.Command{
 	Use:   "switch",
 	Short: "Switch between configured hosts",
 	Long:  "Switch the default host when multiple Nullify instances are configured.",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		switchHost, _ := cmd.Flags().GetString("host")
 		if switchHost == "" && host != "" {
 			switchHost = host
@@ -161,7 +159,7 @@ var switchCmd = &cobra.Command{
 			creds, err := auth.LoadCredentials()
 			if err != nil || len(creds) == 0 {
 				fmt.Println("No configured hosts. Run 'nullify auth login --host <your-instance>.nullify.ai'")
-				return
+				return nil
 			}
 
 			cfg, _ := auth.LoadConfig()
@@ -174,13 +172,12 @@ var switchCmd = &cobra.Command{
 				fmt.Printf("%s%s\n", marker, h)
 			}
 			fmt.Println("\nUse 'nullify auth switch --host <host>' to switch.")
-			return
+			return nil
 		}
 
 		sanitizedHost, err := lib.SanitizeNullifyHost(switchHost)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid host %q\n", switchHost)
-			os.Exit(1)
+			return fmt.Errorf("invalid host %q", switchHost)
 		}
 
 		cfg, err := auth.LoadConfig()
@@ -189,13 +186,12 @@ var switchCmd = &cobra.Command{
 		}
 		cfg.Host = sanitizedHost
 
-		err = auth.SaveConfig(cfg)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to save config: %v\n", err)
-			os.Exit(1)
+		if err := auth.SaveConfig(cfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
 		}
 
 		fmt.Printf("Switched to %s\n", sanitizedHost)
+		return nil
 	},
 }
 
@@ -203,15 +199,16 @@ var configShowCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Show current configuration",
 	Long:  "Display the current CLI configuration as JSON.",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := auth.LoadConfig()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "No config found. Run 'nullify init' to set up.\n")
-			return
+			return nil
 		}
 
 		data, _ := json.MarshalIndent(cfg, "", "  ")
 		fmt.Println(string(data))
+		return nil
 	},
 }
 
@@ -225,25 +222,22 @@ func init() {
 	authCmd.AddCommand(configShowCmd)
 }
 
-func resolveHostForAuth(ctx context.Context) string {
+func resolveHostForAuth() (string, error) {
 	if host != "" {
 		sanitized, err := lib.SanitizeNullifyHost(host)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: invalid host %q\n", host)
-			os.Exit(1)
+			return "", fmt.Errorf("invalid host %q", host)
 		}
-		return sanitized
+		return sanitized, nil
 	}
 
 	cfg, err := auth.LoadConfig()
 	if err == nil && cfg.Host != "" {
 		sanitized, sErr := lib.SanitizeNullifyHost(cfg.Host)
 		if sErr == nil {
-			return sanitized
+			return sanitized, nil
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Error: no host configured. Use --host or run 'nullify auth login'")
-	os.Exit(1)
-	return ""
+	return "", fmt.Errorf("no host configured. Use --host or run 'nullify auth login'")
 }

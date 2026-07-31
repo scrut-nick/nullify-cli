@@ -467,4 +467,3 @@ func (c *Client) GetCspmScansScanId(ctx context.Context, in GetCspmScansScanIdIn
 	}
 	return &out, nil
 }
-

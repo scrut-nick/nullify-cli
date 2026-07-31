@@ -2,11 +2,19 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 
+	"github.com/nullify-platform/cli/internal/api"
 	"github.com/nullify-platform/cli/internal/auth"
+	"github.com/nullify-platform/cli/internal/client"
 	"github.com/nullify-platform/cli/internal/lib"
+	"github.com/nullify-platform/cli/internal/terminal"
 )
+
+func stdinIsTTY() bool {
+	return terminal.IsInteractive(os.Stdin)
+}
 
 type commandAuthContext struct {
 	Host        string
@@ -14,12 +22,27 @@ type commandAuthContext struct {
 	QueryParams map[string]string
 }
 
+// Client builds a NullifyClient for the resolved host and token.
+func (c *commandAuthContext) Client() *client.NullifyClient {
+	return client.NewNullifyClient(c.Host, c.Token)
+}
+
+func (c *commandAuthContext) APIClient() *api.Client {
+	return api.NewClient(c.Host, c.Token, c.QueryParams)
+}
+
 func resolveCommandAuth(ctx context.Context) (*commandAuthContext, error) {
-	commandHost := resolveHost(ctx)
+	commandHost, err := resolveHostE(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	token, err := lib.GetNullifyToken(ctx, commandHost, nullifyToken, githubToken)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, lib.ErrNoToken) {
+			return nil, authError("not authenticated. Run 'nullify auth login' first")
+		}
+		return nil, authError("%w", err)
 	}
 
 	queryParams := map[string]string{}

@@ -6,10 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/nullify-platform/cli/internal/auth"
-	"github.com/nullify-platform/cli/internal/client"
 	"github.com/nullify-platform/cli/internal/lib"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -29,28 +26,17 @@ Supports SAST and SCA dependency findings.`,
   # Fix an SCA dependency finding
   nullify fix def456 --type sca`,
 	Args: cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
 		findingID := args[0]
 
-		fixHost := resolveHost(ctx)
-		token, err := lib.GetNullifyToken(ctx, fixHost, nullifyToken, githubToken)
+		authCtx, err := resolveCommandAuth(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: not authenticated. Run 'nullify auth login' first.\n")
-			os.Exit(ExitAuthError)
+			return err
 		}
-
-		nullifyClient := client.NewNullifyClient(fixHost, token)
-
-		creds, err := auth.LoadCredentials()
-		queryParams := map[string]string{}
-		if err == nil {
-			if hostCreds, ok := creds[auth.CredentialKey(fixHost)]; ok && hostCreds.QueryParameters != nil {
-				queryParams = hostCreds.QueryParameters
-			}
-		}
+		nullifyClient := authCtx.Client()
+		queryParams := authCtx.QueryParams
 
 		findingType, _ := cmd.Flags().GetString("type")
 		createPR, _ := cmd.Flags().GetBool("create-pr")
@@ -62,8 +48,7 @@ Supports SAST and SCA dependency findings.`,
 		case "sca":
 			basePath = "/sca/dependencies/findings"
 		default:
-			fmt.Fprintf(os.Stderr, "Error: --type must be 'sast' or 'sca'\n")
-			os.Exit(1)
+			return fmt.Errorf("--type must be 'sast' or 'sca'")
 		}
 
 		qs := lib.BuildQueryString(queryParams)
@@ -75,16 +60,24 @@ Supports SAST and SCA dependency findings.`,
 		_, err = lib.DoPost(ctx, nullifyClient.HttpClient, nullifyClient.BaseURL,
 			fmt.Sprintf("%s/%s/autofix/fix%s", basePath, url.PathEscape(findingID), qs))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error generating fix: %v\n", err)
-			os.Exit(1)
+			return reportError(
+				cmd,
+				fmt.Errorf("generating fix: %w", err),
+				"Error generating fix: %v\n",
+				err,
+			)
 		}
 
 		// Step 2: Get diff
 		diffBody, err := lib.DoGet(ctx, nullifyClient.HttpClient, nullifyClient.BaseURL,
 			fmt.Sprintf("%s/%s/autofix/cache/diff%s", basePath, url.PathEscape(findingID), qs))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting diff: %v\n", err)
-			os.Exit(1)
+			return reportError(
+				cmd,
+				fmt.Errorf("getting diff: %w", err),
+				"Error getting diff: %v\n",
+				err,
+			)
 		}
 
 		result := map[string]any{
@@ -101,8 +94,12 @@ Supports SAST and SCA dependency findings.`,
 			prBody, err := lib.DoPost(ctx, nullifyClient.HttpClient, nullifyClient.BaseURL,
 				fmt.Sprintf("%s/%s/autofix/cache/create_pr%s", basePath, url.PathEscape(findingID), qs))
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error creating PR: %v\n", err)
-				os.Exit(1)
+				return reportError(
+					cmd,
+					fmt.Errorf("creating PR: %w", err),
+					"Error creating PR: %v\n",
+					err,
+				)
 			}
 			result["pr"] = json.RawMessage(prBody)
 		}
@@ -111,6 +108,7 @@ Supports SAST and SCA dependency findings.`,
 		if err := output.Print(cmd, out); err != nil {
 			fmt.Fprintln(os.Stderr, string(out))
 		}
+		return nil
 	},
 }
 

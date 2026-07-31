@@ -78,4 +78,3 @@ type EndpointsListInfrastructureGraphsOutput struct {
 	Graphs []EndpointsInfrastructureGraphSummary `json:"graphs,omitempty"`
 	Version *string `json:"version,omitempty"`
 }
-

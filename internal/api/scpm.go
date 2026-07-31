@@ -1171,4 +1171,3 @@ func (c *Client) CreateScpmFindingsFindingIdUnallowlist(ctx context.Context, in 
 	data, err := c.do(ctx, "POST", fullURL, bytes.NewReader(bodyBytes))
 	return data, err
 }
-

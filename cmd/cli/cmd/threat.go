@@ -3,12 +3,10 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
 	"github.com/nullify-platform/cli/internal/api"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/output"
 	"github.com/spf13/cobra"
 )
@@ -23,26 +21,28 @@ var threatListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List threat investigations",
 	Example: "  nullify threat list",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		apiClient := getAPIClient()
+		authCtx, err := resolveCommandAuth(ctx)
+		if err != nil {
+			return err
+		}
+		apiClient := authCtx.APIClient()
 
 		result, err := apiClient.ListManagerThreatInvestigations(ctx, api.ListManagerThreatInvestigationsInput{})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 
 		data, err := json.Marshal(result)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 		if err := output.Print(cmd, data); err != nil {
-			fmt.Fprintln(os.Stderr, string(data))
+			fmt.Fprintln(cmd.ErrOrStderr(), string(data))
 		}
+		return nil
 	},
 }
 
@@ -51,28 +51,30 @@ var threatGetCmd = &cobra.Command{
 	Short:   "Get a threat investigation by ID",
 	Args:    cobra.ExactArgs(1),
 	Example: "  nullify threat get ti-123",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		apiClient := getAPIClient()
+		authCtx, err := resolveCommandAuth(ctx)
+		if err != nil {
+			return err
+		}
+		apiClient := authCtx.APIClient()
 
 		result, err := apiClient.GetManagerThreatInvestigationsThreatInvestigationId(ctx, api.GetManagerThreatInvestigationsThreatInvestigationIdInput{
 			ThreatInvestigationID: args[0],
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 
 		data, err := json.Marshal(result)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 		if err := output.Print(cmd, data); err != nil {
-			fmt.Fprintln(os.Stderr, string(data))
+			fmt.Fprintln(cmd.ErrOrStderr(), string(data))
 		}
+		return nil
 	},
 }
 
@@ -81,9 +83,8 @@ var threatCreateCmd = &cobra.Command{
 	Short: "Create a threat investigation",
 	Example: "  nullify threat create --title \"Log4Shell\" --severity critical\n" +
 		"  nullify threat create --title \"CVE sweep\" --cve-ids CVE-2021-44228,CVE-2021-45046",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
 		title, _ := cmd.Flags().GetString("title")
 		description, _ := cmd.Flags().GetString("description")
@@ -116,8 +117,7 @@ var threatCreateCmd = &cobra.Command{
 		if cvss != "" {
 			cvssFloat, err := strconv.ParseFloat(cvss, 64)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: invalid --cvss %q: %v\n", cvss, err)
-				os.Exit(1)
+				return fmt.Errorf("invalid --cvss %q: %w", cvss, err)
 			}
 			in.Cvss = &cvssFloat
 		}
@@ -128,22 +128,25 @@ var threatCreateCmd = &cobra.Command{
 			in.ArticleLinks = splitCSV(articleLinks)
 		}
 
-		apiClient := getAPIClient()
+		authCtx, err := resolveCommandAuth(ctx)
+		if err != nil {
+			return err
+		}
+		apiClient := authCtx.APIClient()
 
 		result, err := apiClient.CreateManagerThreatInvestigations(ctx, in)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 
 		data, err := json.Marshal(result)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 		if err := output.Print(cmd, data); err != nil {
-			fmt.Fprintln(os.Stderr, string(data))
+			fmt.Fprintln(cmd.ErrOrStderr(), string(data))
 		}
+		return nil
 	},
 }
 

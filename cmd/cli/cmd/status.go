@@ -2,17 +2,13 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/nullify-platform/cli/internal/auth"
-	"github.com/nullify-platform/cli/internal/client"
 	"github.com/nullify-platform/cli/internal/lib"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -24,38 +20,27 @@ var securityStatusCmd = &cobra.Command{
 	Long:  "Display a summary of your security posture across all scanner types. Quick morning check-in command.",
 	Example: `  nullify status
   nullify status -o table`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		statusHost := resolveHost(ctx)
-		token, err := lib.GetNullifyToken(ctx, statusHost, nullifyToken, githubToken)
+		authCtx, err := resolveCommandAuth(ctx)
 		if err != nil {
-			if errors.Is(err, lib.ErrNoToken) {
-				fmt.Fprintf(os.Stderr, "Error: not authenticated. Run 'nullify auth login' first.\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			}
-			os.Exit(ExitAuthError)
+			return err
 		}
-
-		nullifyClient := client.NewNullifyClient(statusHost, token)
-
-		creds, err := auth.LoadCredentials()
-		queryParams := map[string]string{}
-		if err == nil {
-			if hostCreds, ok := creds[auth.CredentialKey(statusHost)]; ok && hostCreds.QueryParameters != nil {
-				queryParams = hostCreds.QueryParameters
-			}
-		}
+		nullifyClient := authCtx.Client()
+		queryParams := authCtx.QueryParams
 
 		// Fetch metrics overview
 		qs := lib.BuildQueryString(queryParams)
 		overviewBody, err := lib.DoPostJSON(ctx, nullifyClient.HttpClient, nullifyClient.BaseURL, "/admin/metrics/overview"+qs, strings.NewReader(`{"query":{}}`))
 
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error fetching metrics: %v\n", err)
-			os.Exit(ExitNetworkError)
+			return reportError(
+				cmd,
+				networkError("fetching metrics: %w", err),
+				"Error fetching metrics: %v\n",
+				err,
+			)
 		}
 
 		var overview any
@@ -106,20 +91,19 @@ var securityStatusCmd = &cobra.Command{
 
 		if format == "table" || !outputExplicit {
 			if err := printStatusTable(statusOutput); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
+				return err
 			}
-			return
+			return nil
 		}
 
 		out, err := json.Marshal(statusOutput)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to encode status output: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("failed to encode status output: %w", err)
 		}
 		if err := output.Print(cmd, out); err != nil {
 			fmt.Fprintln(os.Stderr, string(out))
 		}
+		return nil
 	},
 }
 

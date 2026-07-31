@@ -1073,4 +1073,3 @@ func (c *Client) ListSastScanRuns(ctx context.Context, in ListSastScanRunsInput)
 	}
 	return &out, nil
 }
-

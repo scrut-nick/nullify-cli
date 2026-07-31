@@ -173,4 +173,3 @@ type EndpointsNetworkPathDTO struct {
 	StartNodeID string `json:"startNodeId"`
 	StartNodeType string `json:"startNodeType"`
 }
-

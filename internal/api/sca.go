@@ -1718,4 +1718,3 @@ func (c *Client) ListScaScanRuns(ctx context.Context, in ListScaScanRunsInput) (
 	}
 	return &out, nil
 }
-

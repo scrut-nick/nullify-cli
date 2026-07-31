@@ -317,4 +317,3 @@ type ModelsComplianceFrame struct {
 	Framework *string `json:"framework,omitempty"`
 	Version *string `json:"version,omitempty"`
 }
-

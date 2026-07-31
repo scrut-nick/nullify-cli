@@ -3468,4 +3468,3 @@ const (
 	RepocontextTrustedServiceTypeRabbitmq RepocontextTrustedServiceType = "RABBITMQ"
 	RepocontextTrustedServiceTypeRedis RepocontextTrustedServiceType = "REDIS"
 )
-

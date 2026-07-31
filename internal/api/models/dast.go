@@ -2467,4 +2467,3 @@ type ModelsWebFingerprintOverride struct {
 	MaxDepth *int `json:"maxDepth,omitempty"`
 	WafDetection *bool `json:"wafDetection,omitempty"`
 }
-

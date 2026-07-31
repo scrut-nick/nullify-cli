@@ -824,4 +824,3 @@ type ModelsUser struct {
 	UpdatedAt *string `json:"updatedAt,omitempty"`
 	Username string `json:"username"`
 }
-

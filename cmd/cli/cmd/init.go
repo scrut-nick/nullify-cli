@@ -2,9 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/wizard"
 	"github.com/spf13/cobra"
 )
@@ -13,9 +11,8 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Set up Nullify CLI for the first time",
 	Long:  "Interactive setup wizard that configures your Nullify domain, authentication, repository detection, and MCP integration.",
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
 		fmt.Println("Welcome to Nullify CLI setup!")
 		fmt.Println("This wizard will help you get started.")
@@ -31,9 +28,9 @@ var initCmd = &cobra.Command{
 		}
 
 		if err := wizard.Run(ctx, steps); err != nil {
-			logger.L(ctx).Error("setup wizard failed", logger.Err(err))
-			os.Exit(1)
+			return fmt.Errorf("setup wizard failed: %w", err)
 		}
+		return nil
 	},
 }
 

@@ -188,4 +188,3 @@ func (c *Client) ListAssetGraphSummary(ctx context.Context, in ListAssetGraphSum
 	}
 	return &out, nil
 }
-

@@ -2,16 +2,12 @@ package cmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
 
-	"github.com/nullify-platform/cli/internal/auth"
-	"github.com/nullify-platform/cli/internal/client"
 	"github.com/nullify-platform/cli/internal/lib"
-	"github.com/nullify-platform/cli/internal/logger"
 	"github.com/nullify-platform/cli/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -42,30 +38,15 @@ Exit codes:
 
   # Check a specific repo
   nullify ci gate --repo my-org/my-repo`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		ciHost := resolveHost(ctx)
-		token, err := lib.GetNullifyToken(ctx, ciHost, nullifyToken, githubToken)
+		authCtx, err := resolveCommandAuth(ctx)
 		if err != nil {
-			if errors.Is(err, lib.ErrNoToken) {
-				fmt.Fprintf(os.Stderr, "Error: not authenticated. Run 'nullify auth login' first.\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			}
-			os.Exit(ExitAuthError)
+			return err
 		}
-
-		nullifyClient := client.NewNullifyClient(ciHost, token)
-
-		creds, err := auth.LoadCredentials()
-		queryParams := map[string]string{}
-		if err == nil {
-			if hostCreds, ok := creds[auth.CredentialKey(ciHost)]; ok && hostCreds.QueryParameters != nil {
-				queryParams = hostCreds.QueryParameters
-			}
-		}
+		nullifyClient := authCtx.Client()
+		queryParams := authCtx.QueryParams
 
 		severityThreshold, _ := cmd.Flags().GetString("severity-threshold")
 		findingType, _ := cmd.Flags().GetString("type")
@@ -80,8 +61,8 @@ Exit codes:
 			}
 		}
 		if !validThreshold {
-			fmt.Fprintf(os.Stderr, "Error: invalid --severity-threshold %q. Valid values: critical, high, medium, low\n", severityThreshold)
-			os.Exit(1)
+			err := fmt.Errorf("invalid --severity-threshold %q. Valid values: critical, high, medium, low", severityThreshold)
+			return withExitCode(1, err)
 		}
 
 		if repo == "" {
@@ -140,19 +121,19 @@ Exit codes:
 
 		_ = g.Wait()
 
-		// Fail-closed: any scanner request error means we cannot prove the
-		// gate is clean, so treat it as a failure rather than passing.
 		if apiErrors > 0 {
-			fmt.Fprintf(os.Stderr, "Error: %d scanner request(s) failed; failing the gate (cannot confirm a clean result)\n", apiErrors)
-			os.Exit(ExitNetworkError)
+			err := fmt.Errorf("%d scanner request(s) failed; failing the gate (cannot confirm a clean result)", apiErrors)
+			return withExitCode(ExitNetworkError, err)
 		}
 
 		if totalFindings > 0 {
 			fmt.Printf("\nGate failed: %d findings at or above %s severity\n", totalFindings, severityThreshold)
-			os.Exit(ExitFindings)
+			cmd.SilenceErrors = true
+			return withExitCode(ExitFindings, fmt.Errorf("gate failed: %d findings at or above %s severity", totalFindings, severityThreshold))
 		}
 
 		fmt.Println("Gate passed: no findings above threshold")
+		return nil
 	},
 }
 
@@ -165,30 +146,15 @@ format emits a SARIF v2.1.0 document for upload to code-scanning tools.`,
 	Example: `  nullify ci report
   nullify ci report --repo my-org/my-repo
   nullify ci report --format sarif > nullify.sarif`,
-	Run: func(cmd *cobra.Command, args []string) {
-		ctx := setupLogger(cmd.Context())
-		defer logger.Close(ctx)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 
-		ciHost := resolveHost(ctx)
-		token, err := lib.GetNullifyToken(ctx, ciHost, nullifyToken, githubToken)
+		authCtx, err := resolveCommandAuth(ctx)
 		if err != nil {
-			if errors.Is(err, lib.ErrNoToken) {
-				fmt.Fprintf(os.Stderr, "Error: not authenticated. Run 'nullify auth login' first.\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			}
-			os.Exit(ExitAuthError)
+			return err
 		}
-
-		nullifyClient := client.NewNullifyClient(ciHost, token)
-
-		creds, err := auth.LoadCredentials()
-		queryParams := map[string]string{}
-		if err == nil {
-			if hostCreds, ok := creds[auth.CredentialKey(ciHost)]; ok && hostCreds.QueryParameters != nil {
-				queryParams = hostCreds.QueryParameters
-			}
-		}
+		nullifyClient := authCtx.Client()
+		queryParams := authCtx.QueryParams
 
 		repo, _ := cmd.Flags().GetString("repo")
 		if repo == "" {
@@ -199,8 +165,7 @@ format emits a SARIF v2.1.0 document for upload to code-scanning tools.`,
 		switch format {
 		case "markdown", "sarif":
 		default:
-			fmt.Fprintf(os.Stderr, "Error: invalid --format %q. Valid values: markdown, sarif\n", format)
-			os.Exit(1)
+			return withExitCode(1, fmt.Errorf("invalid --format %q. Valid values: markdown, sarif", format))
 		}
 
 		endpoints := allScannerEndpoints()
@@ -253,8 +218,7 @@ format emits a SARIF v2.1.0 document for upload to code-scanning tools.`,
 		_ = g.Wait()
 
 		if successCount == 0 {
-			fmt.Fprintln(os.Stderr, "Error: all API requests failed, cannot generate report")
-			os.Exit(ExitNetworkError)
+			return networkError("all API requests failed, cannot generate report")
 		}
 		if apiErrors > 0 {
 			fmt.Fprintf(os.Stderr, "Warning: %d API requests failed while generating the report\n", apiErrors)
@@ -268,11 +232,10 @@ format emits a SARIF v2.1.0 document for upload to code-scanning tools.`,
 			wrapped, _ := json.Marshal(map[string]any{"findings": all, "total": len(all)})
 			sarifBytes, err := output.SARIFBytes(wrapped)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: failed to build SARIF report: %v\n", err)
-				os.Exit(ExitNetworkError)
+				return networkError("failed to build SARIF report: %w", err)
 			}
 			fmt.Println(string(sarifBytes))
-			return
+			return nil
 		}
 
 		fmt.Println("## Nullify Security Report")
@@ -288,6 +251,7 @@ format emits a SARIF v2.1.0 document for upload to code-scanning tools.`,
 
 		fmt.Println()
 		fmt.Println("*Generated by [Nullify CLI](https://github.com/nullify-platform/cli)*")
+		return nil
 	},
 }
 
