@@ -6,6 +6,9 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
+# Run in the background while the session starts
+echo '{"async": true, "asyncTimeout": 600000}'
+
 cd "$CLAUDE_PROJECT_DIR"
 
 # Download Go modules (also fetches the toolchain pinned in go.mod on first run)
