@@ -12,5 +12,11 @@ Installed by `.claude/hooks/session-start.sh`; wired up in `.mcp.json`.
 Notes:
 - `.git` directories are stripped; to update, re-clone upstream, review the
   diff, and replace the directory (update the pinned commit above).
-- `purple-mcp`'s upstream `CLAUDE.md`/`AGENTS.md` are removed so third-party
-  agent instructions are not auto-loaded into sessions working in this repo.
+- `purple-mcp`'s upstream `CLAUDE.md`/`AGENTS.md` and `latent-defense-mcp`'s
+  upstream `.claude/` directory (CLAUDE.md, a broad tool-permission allowlist,
+  and slash-command skills) are removed so third-party agent instructions and
+  permission grants are not auto-loaded into sessions working in this repo.
+  The Latent Defense runtime skills the MCP server serves ship inside the
+  Python package (`latent_defense_mcp/skills/`) and are unaffected; re-run
+  upstream's `latent-defense-mcp-init` if you ever want their interactive
+  scaffolding.
