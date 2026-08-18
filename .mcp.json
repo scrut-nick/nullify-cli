@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "nullify": {
+      "command": "go",
+      "args": ["run", "./cmd/cli", "mcp", "serve"],
+      "env": {
+        "NULLIFY_HOST": "${NULLIFY_HOST}",
+        "NULLIFY_TOKEN": "${NULLIFY_TOKEN}"
+      }
+    },
+    "sentinelone": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/Sentinel-One/purple-mcp.git",
+        "purple-mcp",
+        "--mode",
+        "stdio"
+      ],
+      "env": {
+        "PURPLEMCP_CONSOLE_TOKEN": "${PURPLEMCP_CONSOLE_TOKEN}",
+        "PURPLEMCP_CONSOLE_BASE_URL": "${PURPLEMCP_CONSOLE_BASE_URL}"
+      }
+    },
+    "latent-defense": {
+      "command": "latent-defense-mcp",
+      "env": {
+        "LATENT_DEFENSE_URL": "${LATENT_DEFENSE_URL}",
+        "LATENT_DEFENSE_API_KEY": "${LATENT_DEFENSE_API_KEY}"
+      }
+    }
+  }
+}
