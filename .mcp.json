@@ -12,7 +12,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/Sentinel-One/purple-mcp.git",
+        "./third_party/purple-mcp",
         "purple-mcp",
         "--mode",
         "stdio"
