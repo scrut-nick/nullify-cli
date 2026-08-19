@@ -1,0 +1,30 @@
+name: Linting and Formatting
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: purple-mcp-ruff-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+
+      - name: Run ruff check
+        run: |
+          uv run ruff check .
+
+      - name: Run ruff format check
+        run: |
+          uv run ruff format --check

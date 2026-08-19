@@ -28,4 +28,47 @@ if ! golangci-lint version 2>/dev/null | grep -q "version ${GOLANGCI_LINT_VERSIO
     go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 fi
 
-echo "Session start hook completed: Go modules downloaded, build cache warmed, golangci-lint $GOLANGCI_LINT_VERSION installed."
+# --- MCP servers (vendored in third_party/, wired up in .mcp.json) ---
+
+# Latent Defense: install the vendored package into an isolated uv tool env
+if ! command -v latent-defense-mcp >/dev/null 2>&1; then
+  uv tool install ./third_party/latent-defense-mcp \
+    || echo "warning: failed to install latent-defense-mcp" >&2
+fi
+
+# SentinelOne Purple AI: pre-build the uvx environment for the vendored package
+uvx --from ./third_party/purple-mcp purple-mcp --help >/dev/null 2>&1 \
+  || echo "warning: failed to pre-build purple-mcp env" >&2
+
+# --- Secrets via 1Password ---
+# Set OP_SERVICE_ACCOUNT_TOKEN as the single environment secret; the hook
+# resolves the rest from a 1Password item whose field names match the env
+# var names. Defaults: vault "Claude", item "cloud-session-env" (override
+# with CLAUDE_OP_VAULT / CLAUDE_OP_ITEM). Vars already set in the
+# environment are left untouched.
+if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+  if ! command -v op >/dev/null 2>&1; then
+    OP_CLI_VERSION="v2.31.1"
+    curl -sSfLo /tmp/op.zip \
+      "https://cache.agilebits.com/dist/1P/op2/pkg/${OP_CLI_VERSION}/op_linux_amd64_${OP_CLI_VERSION}.zip" \
+      && unzip -oq /tmp/op.zip -d /usr/local/bin op \
+      && chmod +x /usr/local/bin/op \
+      || echo "warning: could not install 1Password CLI — allow cache.agilebits.com in the environment's network policy" >&2
+  fi
+  if command -v op >/dev/null 2>&1; then
+    OP_VAULT="${CLAUDE_OP_VAULT:-Claude}"
+    OP_ITEM="${CLAUDE_OP_ITEM:-cloud-session-env}"
+    for var in NULLIFY_HOST NULLIFY_TOKEN \
+               PURPLEMCP_CONSOLE_TOKEN PURPLEMCP_CONSOLE_BASE_URL \
+               LATENT_DEFENSE_URL LATENT_DEFENSE_API_KEY; do
+      if [ -z "${!var:-}" ]; then
+        val="$(op read "op://${OP_VAULT}/${OP_ITEM}/${var}" 2>/dev/null || true)"
+        if [ -n "$val" ]; then
+          printf 'export %s=%q\n' "$var" "$val" >> "$CLAUDE_ENV_FILE"
+        fi
+      fi
+    done
+  fi
+fi
+
+echo "Session start hook completed: Go toolchain ready, MCP servers installed, secrets resolved."
