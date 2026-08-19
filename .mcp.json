@@ -4,7 +4,7 @@
       "command": "go",
       "args": ["run", "./cmd/cli", "mcp", "serve"],
       "env": {
-        "NULLIFY_HOST": "${NULLIFY_HOST}",
+        "NULLIFY_HOST": "${NULLIFY_HOST:-scrut.nullify.ai}",
         "NULLIFY_TOKEN": "${NULLIFY_TOKEN}"
       }
     },
