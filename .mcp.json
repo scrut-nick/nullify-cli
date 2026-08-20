@@ -4,9 +4,9 @@
       "command": "bash",
       "args": [
         ".claude/mcp/with-op-env.sh",
-        "NULLIFY_TOKEN",
+        "NULLIFY_CREDENTIALS_JSON",
         "--",
-        "go", "run", "./cmd/cli", "mcp", "serve"
+        "bash", ".claude/mcp/nullify-serve.sh"
       ],
       "env": {
         "NULLIFY_HOST": "${NULLIFY_HOST:-scrut.nullify.ai}"

@@ -58,7 +58,22 @@ if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
   if command -v op >/dev/null 2>&1; then
     OP_VAULT="${CLAUDE_OP_VAULT:-Claude}"
     OP_ITEM="${CLAUDE_OP_ITEM:-cloud-session-env}"
-    for var in NULLIFY_HOST NULLIFY_TOKEN \
+
+    # Seed the Nullify CLI credentials file so its built-in refresh flow
+    # mints fresh access tokens (an env NULLIFY_TOKEN would override stored
+    # credentials in the CLI, so that var is deliberately NOT resolved here).
+    if [ ! -s "$HOME/.nullify/credentials.json" ]; then
+      nullify_creds="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_CREDENTIALS_JSON" 2>/dev/null || true)"
+      if [ -n "$nullify_creds" ]; then
+        mkdir -p "$HOME/.nullify"
+        chmod 700 "$HOME/.nullify"
+        printf '%s' "$nullify_creds" > "$HOME/.nullify/credentials.json"
+        chmod 600 "$HOME/.nullify/credentials.json"
+        unset nullify_creds
+      fi
+    fi
+
+    for var in NULLIFY_HOST \
                PURPLEMCP_CONSOLE_TOKEN PURPLEMCP_CONSOLE_BASE_URL \
                LATENT_DEFENSE_URL LATENT_DEFENSE_API_KEY; do
       if [ -z "${!var:-}" ]; then
