@@ -11,34 +11,10 @@ echo '{"async": true, "asyncTimeout": 600000}'
 
 cd "$CLAUDE_PROJECT_DIR"
 
-# Download Go modules (also fetches the toolchain pinned in go.mod on first run)
-go mod download
-
-# Warm the build cache so builds, tests, and lint runs are fast
-go build ./... || true
-
-# Install the golangci-lint version pinned in the Dockerfile (same as CI).
-# Installed via the Go module proxy; GitHub release downloads are blocked here.
-GOLANGCI_LINT_VERSION="$(sh scripts/get_golangci_lint_version.sh)"
-# Build it with the same toolchain the module targets, otherwise golangci-lint
-# refuses to lint code whose Go version is newer than the one it was built with.
-GO_VERSION="$(go mod edit -json | grep -oP '"Go":\s*"\K[0-9.]+')"
-if ! golangci-lint version 2>/dev/null | grep -q "version ${GOLANGCI_LINT_VERSION#v}.*go${GO_VERSION}"; then
-  GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin \
-    go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
-fi
-
-# --- MCP servers (vendored in third_party/, wired up in .mcp.json) ---
-
-# Latent Defense: install the vendored package into an isolated uv tool env
-if ! command -v latent-defense-mcp >/dev/null 2>&1; then
-  uv tool install ./third_party/latent-defense-mcp \
-    || echo "warning: failed to install latent-defense-mcp" >&2
-fi
-
-# SentinelOne Purple AI: pre-build the uvx environment for the vendored package
-uvx --from ./third_party/purple-mcp purple-mcp --help >/dev/null 2>&1 \
-  || echo "warning: failed to pre-build purple-mcp env" >&2
+# ============================================================
+# 1. MCP-critical setup FIRST — servers launch at session start
+#    and time out if these take too long on a cold container.
+# ============================================================
 
 # --- Secrets via 1Password ---
 # Set OP_SERVICE_ACCOUNT_TOKEN as the single environment secret; the hook
@@ -86,4 +62,38 @@ if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
   fi
 fi
 
-echo "Session start hook completed: Go toolchain ready, MCP servers installed, secrets resolved."
+# --- MCP servers (vendored in third_party/, wired up in .mcp.json) ---
+
+# Latent Defense: install the vendored package into an isolated uv tool env
+if ! command -v latent-defense-mcp >/dev/null 2>&1; then
+  uv tool install ./third_party/latent-defense-mcp \
+    || echo "warning: failed to install latent-defense-mcp" >&2
+fi
+
+# SentinelOne Purple AI: pre-build the uvx environment for the vendored package
+uvx --from ./third_party/purple-mcp purple-mcp --help >/dev/null 2>&1 \
+  || echo "warning: failed to pre-build purple-mcp env" >&2
+
+# Nullify: download Go modules so 'go run ./cmd/cli mcp serve' starts fast
+# (also fetches the toolchain pinned in go.mod on first run)
+go mod download
+
+# ============================================================
+# 2. Dev-tooling warmup — nothing at session start depends on it
+# ============================================================
+
+# Warm the build cache so builds, tests, and lint runs are fast
+go build ./... || true
+
+# Install the golangci-lint version pinned in the Dockerfile (same as CI).
+# Installed via the Go module proxy; GitHub release downloads are blocked here.
+GOLANGCI_LINT_VERSION="$(sh scripts/get_golangci_lint_version.sh)"
+# Build it with the same toolchain the module targets, otherwise golangci-lint
+# refuses to lint code whose Go version is newer than the one it was built with.
+GO_VERSION="$(go mod edit -json | grep -oP '"Go":\s*"\K[0-9.]+')"
+if ! golangci-lint version 2>/dev/null | grep -q "version ${GOLANGCI_LINT_VERSION#v}.*go${GO_VERSION}"; then
+  GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin \
+    go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+fi
+
+echo "Session start hook completed: secrets resolved, MCP servers installed, Go toolchain ready."

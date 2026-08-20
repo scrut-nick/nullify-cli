@@ -23,11 +23,20 @@ for var in "${vars[@]}"; do
 done
 
 if [ "$missing" -eq 1 ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-  # The session-start hook installs op asynchronously; wait briefly for it
-  for _ in $(seq 1 45); do
+  # The session-start hook installs op asynchronously; wait briefly, then
+  # install it ourselves rather than missing the MCP startup window.
+  for _ in $(seq 1 10); do
     command -v op >/dev/null 2>&1 && break
     sleep 2
   done
+  if ! command -v op >/dev/null 2>&1; then
+    OP_CLI_VERSION="v2.31.1"
+    curl -sSfLo /tmp/op-mcp.zip \
+      "https://cache.agilebits.com/dist/1P/op2/pkg/${OP_CLI_VERSION}/op_linux_amd64_${OP_CLI_VERSION}.zip" \
+      && unzip -oq /tmp/op-mcp.zip -d /usr/local/bin op \
+      && chmod +x /usr/local/bin/op \
+      || true
+  fi
   if command -v op >/dev/null 2>&1; then
     vault="${CLAUDE_OP_VAULT:-Claude}"
     item="${CLAUDE_OP_ITEM:-cloud-session-env}"
