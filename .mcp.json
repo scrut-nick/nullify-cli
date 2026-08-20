@@ -1,33 +1,34 @@
 {
   "mcpServers": {
     "nullify": {
-      "command": "go",
-      "args": ["run", "./cmd/cli", "mcp", "serve"],
+      "command": "bash",
+      "args": [
+        ".claude/mcp/with-op-env.sh",
+        "NULLIFY_TOKEN",
+        "--",
+        "go", "run", "./cmd/cli", "mcp", "serve"
+      ],
       "env": {
-        "NULLIFY_HOST": "${NULLIFY_HOST:-scrut.nullify.ai}",
-        "NULLIFY_TOKEN": "${NULLIFY_TOKEN}"
+        "NULLIFY_HOST": "${NULLIFY_HOST:-scrut.nullify.ai}"
       }
     },
     "sentinelone": {
-      "command": "uvx",
+      "command": "bash",
       "args": [
-        "--from",
-        "./third_party/purple-mcp",
-        "purple-mcp",
-        "--mode",
-        "stdio"
-      ],
-      "env": {
-        "PURPLEMCP_CONSOLE_TOKEN": "${PURPLEMCP_CONSOLE_TOKEN}",
-        "PURPLEMCP_CONSOLE_BASE_URL": "${PURPLEMCP_CONSOLE_BASE_URL}"
-      }
+        ".claude/mcp/with-op-env.sh",
+        "PURPLEMCP_CONSOLE_TOKEN", "PURPLEMCP_CONSOLE_BASE_URL",
+        "--",
+        "uvx", "--from", "./third_party/purple-mcp", "purple-mcp", "--mode", "stdio"
+      ]
     },
     "latent-defense": {
-      "command": "latent-defense-mcp",
-      "env": {
-        "LATENT_DEFENSE_URL": "${LATENT_DEFENSE_URL}",
-        "LATENT_DEFENSE_API_KEY": "${LATENT_DEFENSE_API_KEY}"
-      }
+      "command": "bash",
+      "args": [
+        ".claude/mcp/with-op-env.sh",
+        "LATENT_DEFENSE_URL", "LATENT_DEFENSE_API_KEY",
+        "--",
+        "latent-defense-mcp"
+      ]
     }
   }
 }
