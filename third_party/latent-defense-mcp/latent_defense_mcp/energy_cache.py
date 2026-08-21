@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,10 @@ _CACHE_DIR = Path(os.environ.get(
 
 def _db_path(branch_id: str) -> Path:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return _CACHE_DIR / f"{branch_id}.db"
+    safe_id = re.sub(r"[^a-zA-Z0-9._-]", "", branch_id)
+    if not safe_id:
+        raise ValueError("Invalid branch_id")
+    return _CACHE_DIR / f"{safe_id}.db"
 
 
 class EnergyGraphCache:

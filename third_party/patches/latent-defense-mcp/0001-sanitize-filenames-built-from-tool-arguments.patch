@@ -1,0 +1,176 @@
+Subject: [PATCH] latent-defense-mcp: sanitize filenames built from tool arguments
+
+Backported from upstream commit a663cec00a02b8b4183aace2b85270ea3f2efce3
+("Added Cursor support.") in https://github.com/latent-defense/latent-defense-mcp.
+
+Our vendored copy stays pinned at 85917e7 because that upstream commit also
+relicenses the package to Proprietary and builds its skill bundle with a forced
+include from .claude/skills and .cursor/skills, which we strip when vendoring —
+so the wheel no longer builds. Those questions are with the vendor. These two
+fixes are not contingent on the answers, so they come across on their own.
+
+Both bugs let an MCP tool argument steer a filesystem write out of its intended
+directory:
+
+  * energy_cache._db_path() interpolated branch_id straight into a SQLite
+    filename.
+  * triage_state built user- and project-profile JSON filenames from tool
+    arguments unsanitised (10 call sites).
+
+Scope: the security hunks only. The same upstream commit adds a
+ticketing_integration profile field and scrubs some internal references from
+comments; both are deliberately left out so this patch stays reviewable.
+
+Drop this patch once we vendor a663cec or later — upstream carries these exact
+lines, so the tree converges with no conflict.
+
+Already applied to the vendored tree; kept here so a re-vendor can re-apply it:
+    git apply third_party/patches/latent-defense-mcp/0001-*.patch
+
+Verified: upstream's suite passes with it applied (164 tests, unchanged from the
+bare pin), and a probe driving the real tool functions with a traversal payload
+escapes its directory before the patch and stays contained after.
+
+diff --git a/third_party/latent-defense-mcp/latent_defense_mcp/energy_cache.py b/third_party/latent-defense-mcp/latent_defense_mcp/energy_cache.py
+index 11fc233..fd6dca9 100644
+--- a/third_party/latent-defense-mcp/latent_defense_mcp/energy_cache.py
++++ b/third_party/latent-defense-mcp/latent_defense_mcp/energy_cache.py
+@@ -12,6 +12,7 @@ from __future__ import annotations
+ import json
+ import logging
+ import os
++import re
+ import sqlite3
+ from pathlib import Path
+ from typing import Any
+@@ -28,7 +29,10 @@ _CACHE_DIR = Path(os.environ.get(
+ 
+ def _db_path(branch_id: str) -> Path:
+     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+-    return _CACHE_DIR / f"{branch_id}.db"
++    safe_id = re.sub(r"[^a-zA-Z0-9._-]", "", branch_id)
++    if not safe_id:
++        raise ValueError("Invalid branch_id")
++    return _CACHE_DIR / f"{safe_id}.db"
+ 
+ 
+ class EnergyGraphCache:
+diff --git a/third_party/latent-defense-mcp/latent_defense_mcp/triage_state.py b/third_party/latent-defense-mcp/latent_defense_mcp/triage_state.py
+index c3d69b2..9b47a86 100644
+--- a/third_party/latent-defense-mcp/latent_defense_mcp/triage_state.py
++++ b/third_party/latent-defense-mcp/latent_defense_mcp/triage_state.py
+@@ -9,11 +9,24 @@ from __future__ import annotations
+ 
+ import json
+ import os
++import re
+ from datetime import datetime
+ from pathlib import Path
+ from typing import Any
+ 
+ 
++def _safe_filename(name: str) -> str:
++    """Sanitize a name for use as a filename. Strips path separators and traversal."""
++    # Remove path separators and traversal sequences
++    name = name.replace("/", "").replace("\\", "").replace("..", "").replace("\0", "")
++    # Keep only alphanumeric, hyphens, underscores, dots
++    name = re.sub(r"[^a-zA-Z0-9._-]", "-", name)
++    # Don't allow empty or dot-only names
++    if not name or name.strip(".") == "":
++        name = "unnamed"
++    return name[:200]  # cap length
++
++
+ def _dt_now() -> str:
+     return datetime.now().isoformat()
+ 
+@@ -47,7 +60,7 @@ def register(mcp: Any) -> None:
+         data: dict = json.loads(user) if isinstance(user, str) else user
+         state = _state_dir()
+         (state / "users").mkdir(parents=True, exist_ok=True)
+-        user_id = data.get("name", "default").lower().replace(" ", "-")
++        user_id = _safe_filename(data.get("name", "default").lower().replace(" ", "-"))
+         path = state / "users" / f"{user_id}.json"
+ 
+         existing: dict = {}
+@@ -80,7 +93,7 @@ def register(mcp: Any) -> None:
+     @mcp.tool()
+     async def triage_load_user(name: str = "default") -> str:
+         """Load a user profile. Returns everything the system knows about this user."""
+-        user_id = name.lower().replace(" ", "-")
++        user_id = _safe_filename(name.lower().replace(" ", "-"))
+         path = _state_dir() / "users" / f"{user_id}.json"
+         if not path.exists():
+             users_dir = _state_dir() / "users"
+@@ -113,7 +126,7 @@ def register(mcp: Any) -> None:
+         data: dict = json.loads(project) if isinstance(project, str) else project
+         state = _state_dir()
+         (state / "projects").mkdir(parents=True, exist_ok=True)
+-        path = state / "projects" / f"{project_id}.json"
++        path = state / "projects" / f"{_safe_filename(project_id)}.json"
+ 
+         existing: dict = {}
+         if path.exists():
+@@ -148,7 +161,7 @@ def register(mcp: Any) -> None:
+     @mcp.tool()
+     async def triage_load_project(project_id: str) -> str:
+         """Load a triage project with full state."""
+-        path = _state_dir() / "projects" / f"{project_id}.json"
++        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
+         if not path.exists():
+             listing = json.loads(await triage_list_projects())
+             return json.dumps({"error": f"Project '{project_id}' not found", "available": listing})
+@@ -196,7 +209,7 @@ def register(mcp: Any) -> None:
+                     Valid statuses: pending, investigating, fixed, mitigated, accepted, deferred, wont_fix.
+         """
+         update_data: dict = json.loads(update) if isinstance(update, str) else update
+-        path = _state_dir() / "projects" / f"{project_id}.json"
++        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
+         if not path.exists():
+             return json.dumps({"error": f"Project '{project_id}' not found"})
+         with open(path) as f:
+@@ -239,7 +252,7 @@ def register(mcp: Any) -> None:
+                        commands (list), context (str), status (str).
+         """
+         wi: dict = json.loads(work_item) if isinstance(work_item, str) else work_item
+-        path = _state_dir() / "projects" / f"{project_id}.json"
++        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
+         if not path.exists():
+             return json.dumps({"error": f"Project '{project_id}' not found"})
+         with open(path) as f:
+@@ -276,7 +289,7 @@ def register(mcp: Any) -> None:
+                       review_date (str), decided_by (str), conditions (str).
+         """
+         dec: dict = json.loads(decision) if isinstance(decision, str) else decision
+-        path = _state_dir() / "projects" / f"{project_id}.json"
++        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
+         if not path.exists():
+             return json.dumps({"error": f"Project '{project_id}' not found"})
+         with open(path) as f:
+@@ -306,7 +319,7 @@ def register(mcp: Any) -> None:
+ 
+         Call at the start of every session to orient.
+         """
+-        path = _state_dir() / "projects" / f"{project_id}.json"
++        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
+         if not path.exists():
+             return json.dumps({"error": f"Project '{project_id}' not found"})
+         with open(path) as f:
+@@ -378,7 +391,7 @@ def register(mcp: Any) -> None:
+         Bridges project state into workflow execution. Validates that all file
+         paths exist and required fields are present.
+         """
+-        path = _state_dir() / "projects" / f"{project_id}.json"
++        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
+         if not path.exists():
+             return json.dumps({"error": f"Project '{project_id}' not found"})
+         with open(path) as f:
+@@ -387,7 +400,7 @@ def register(mcp: Any) -> None:
+         user_context = data.get("user_context", {})
+         user_name = data.get("_user", "")
+         if user_name:
+-            user_path = _state_dir() / "users" / f"{user_name}.json"
++            user_path = _state_dir() / "users" / f"{_safe_filename(user_name)}.json"
+             if user_path.exists():
+                 with open(user_path) as uf:
+                     user_data = json.load(uf)

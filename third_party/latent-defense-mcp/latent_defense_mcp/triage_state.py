@@ -9,9 +9,22 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitize a name for use as a filename. Strips path separators and traversal."""
+    # Remove path separators and traversal sequences
+    name = name.replace("/", "").replace("\\", "").replace("..", "").replace("\0", "")
+    # Keep only alphanumeric, hyphens, underscores, dots
+    name = re.sub(r"[^a-zA-Z0-9._-]", "-", name)
+    # Don't allow empty or dot-only names
+    if not name or name.strip(".") == "":
+        name = "unnamed"
+    return name[:200]  # cap length
 
 
 def _dt_now() -> str:
@@ -47,7 +60,7 @@ def register(mcp: Any) -> None:
         data: dict = json.loads(user) if isinstance(user, str) else user
         state = _state_dir()
         (state / "users").mkdir(parents=True, exist_ok=True)
-        user_id = data.get("name", "default").lower().replace(" ", "-")
+        user_id = _safe_filename(data.get("name", "default").lower().replace(" ", "-"))
         path = state / "users" / f"{user_id}.json"
 
         existing: dict = {}
@@ -80,7 +93,7 @@ def register(mcp: Any) -> None:
     @mcp.tool()
     async def triage_load_user(name: str = "default") -> str:
         """Load a user profile. Returns everything the system knows about this user."""
-        user_id = name.lower().replace(" ", "-")
+        user_id = _safe_filename(name.lower().replace(" ", "-"))
         path = _state_dir() / "users" / f"{user_id}.json"
         if not path.exists():
             users_dir = _state_dir() / "users"
@@ -113,7 +126,7 @@ def register(mcp: Any) -> None:
         data: dict = json.loads(project) if isinstance(project, str) else project
         state = _state_dir()
         (state / "projects").mkdir(parents=True, exist_ok=True)
-        path = state / "projects" / f"{project_id}.json"
+        path = state / "projects" / f"{_safe_filename(project_id)}.json"
 
         existing: dict = {}
         if path.exists():
@@ -148,7 +161,7 @@ def register(mcp: Any) -> None:
     @mcp.tool()
     async def triage_load_project(project_id: str) -> str:
         """Load a triage project with full state."""
-        path = _state_dir() / "projects" / f"{project_id}.json"
+        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
         if not path.exists():
             listing = json.loads(await triage_list_projects())
             return json.dumps({"error": f"Project '{project_id}' not found", "available": listing})
@@ -196,7 +209,7 @@ def register(mcp: Any) -> None:
                     Valid statuses: pending, investigating, fixed, mitigated, accepted, deferred, wont_fix.
         """
         update_data: dict = json.loads(update) if isinstance(update, str) else update
-        path = _state_dir() / "projects" / f"{project_id}.json"
+        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
         if not path.exists():
             return json.dumps({"error": f"Project '{project_id}' not found"})
         with open(path) as f:
@@ -239,7 +252,7 @@ def register(mcp: Any) -> None:
                        commands (list), context (str), status (str).
         """
         wi: dict = json.loads(work_item) if isinstance(work_item, str) else work_item
-        path = _state_dir() / "projects" / f"{project_id}.json"
+        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
         if not path.exists():
             return json.dumps({"error": f"Project '{project_id}' not found"})
         with open(path) as f:
@@ -276,7 +289,7 @@ def register(mcp: Any) -> None:
                       review_date (str), decided_by (str), conditions (str).
         """
         dec: dict = json.loads(decision) if isinstance(decision, str) else decision
-        path = _state_dir() / "projects" / f"{project_id}.json"
+        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
         if not path.exists():
             return json.dumps({"error": f"Project '{project_id}' not found"})
         with open(path) as f:
@@ -306,7 +319,7 @@ def register(mcp: Any) -> None:
 
         Call at the start of every session to orient.
         """
-        path = _state_dir() / "projects" / f"{project_id}.json"
+        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
         if not path.exists():
             return json.dumps({"error": f"Project '{project_id}' not found"})
         with open(path) as f:
@@ -378,7 +391,7 @@ def register(mcp: Any) -> None:
         Bridges project state into workflow execution. Validates that all file
         paths exist and required fields are present.
         """
-        path = _state_dir() / "projects" / f"{project_id}.json"
+        path = _state_dir() / "projects" / f"{_safe_filename(project_id)}.json"
         if not path.exists():
             return json.dumps({"error": f"Project '{project_id}' not found"})
         with open(path) as f:
@@ -387,7 +400,7 @@ def register(mcp: Any) -> None:
         user_context = data.get("user_context", {})
         user_name = data.get("_user", "")
         if user_name:
-            user_path = _state_dir() / "users" / f"{user_name}.json"
+            user_path = _state_dir() / "users" / f"{_safe_filename(user_name)}.json"
             if user_path.exists():
                 with open(user_path) as uf:
                     user_data = json.load(uf)
