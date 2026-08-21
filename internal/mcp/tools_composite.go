@@ -74,12 +74,6 @@ func registerCompositeTools(s *server.MCPServer, c *client.NullifyClient, queryP
 			severity := getStringArg(args, "severity")
 			limit := getIntArg(args, "limit", 20)
 
-			extra := []string{"repository", repo}
-			if severity != "" {
-				extra = append(extra, "severity", severity)
-			}
-			extra = append(extra, "limit", fmt.Sprintf("%d", limit))
-
 			endpoints := []struct {
 				name string
 				path string
@@ -93,17 +87,34 @@ func registerCompositeTools(s *server.MCPServer, c *client.NullifyClient, queryP
 				{"cspm", "/cspm/findings"},
 			}
 
+			// The repository name is the whole point of this tool, so a name
+			// that cannot be turned into the repository-id parameter the API
+			// filters on is an error - returning every repository's findings
+			// under this tool's name would be worse than failing.
+			filterArgs := map[string]any{"repository": repo, "severity": severity}
+
 			var parts []string
-			qs := buildQueryString(queryParams, extra...)
 			for _, ep := range endpoints {
-				result, err := doGet(ctx, c, ep.path+qs)
+				translated, unapplied, err := translateListFilters(ctx, c, ep.path, filterArgs, queryParams)
 				if err != nil {
-					parts = append(parts, fmt.Sprintf("--- %s ---\nError: %v", ep.name, err))
+					return toolError(err), nil
+				}
+
+				extra := append([]string{"limit", fmt.Sprintf("%d", limit)}, translated...)
+				header := fmt.Sprintf("--- %s ---", ep.name)
+				if len(unapplied) > 0 {
+					header += fmt.Sprintf("\nNOTE: not filtered by %s (unsupported by %s)",
+						strings.Join(unapplied, ", "), ep.path)
+				}
+
+				result, err := doGet(ctx, c, ep.path+buildQueryString(queryParams, extra...))
+				if err != nil {
+					parts = append(parts, fmt.Sprintf("%s\nError: %v", header, err))
 					continue
 				}
 				if len(result.Content) > 0 {
 					if tc, ok := result.Content[0].(mcp.TextContent); ok {
-						parts = append(parts, fmt.Sprintf("--- %s ---\n%s", ep.name, tc.Text))
+						parts = append(parts, fmt.Sprintf("%s\n%s", header, tc.Text))
 					}
 				}
 			}
