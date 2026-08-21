@@ -29,6 +29,16 @@
         "--",
         "latent-defense-mcp"
       ]
+    },
+    "aws": {
+      "command": "bash",
+      "args": [
+        ".claude/mcp/with-op-env.sh",
+        "SCRUT_AWS_ACCESS_KEY_ID", "SCRUT_AWS_SECRET_ACCESS_KEY",
+        "SCRUT_AWS_SESSION_TOKEN", "SCRUT_AWS_REGION",
+        "--",
+        "bash", ".claude/mcp/aws-serve.sh"
+      ]
     }
   }
 }
