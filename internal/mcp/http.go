@@ -63,18 +63,34 @@ func doRequest(ctx context.Context, c *client.NullifyClient, method string, path
 	return toolResult(string(body)), nil
 }
 
-// makeGetHandler creates a handler for list endpoints with standard filtering
+// makeGetHandler creates a handler for list endpoints with standard filtering.
+// Filters the endpoint cannot apply are rejected rather than forwarded: the API
+// ignores unknown query parameters, so forwarding one returns an unfiltered
+// page that the caller would read as filtered.
 func makeGetHandler(c *client.NullifyClient, basePath string, queryParams map[string]string) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args := request.GetArguments()
 		extra := []string{}
 		for key := range args {
+			if translatedFilters[key] {
+				continue
+			}
 			if key == "limit" {
 				extra = append(extra, key, fmt.Sprintf("%d", getIntArg(args, key, 20)))
 			} else if s := getStringArg(args, key); s != "" {
 				extra = append(extra, key, s)
 			}
 		}
+
+		translated, unapplied, err := translateListFilters(ctx, c, basePath, args, queryParams)
+		if err != nil {
+			return toolError(err), nil
+		}
+		if len(unapplied) > 0 {
+			return toolError(unsupportedFilterError(basePath, unapplied)), nil
+		}
+		extra = append(extra, translated...)
+
 		qs := buildQueryString(queryParams, extra...)
 		return doGet(ctx, c, basePath+qs)
 	}

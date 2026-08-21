@@ -86,23 +86,15 @@ func registerUnifiedTools(s *server.MCPServer, c *client.NullifyClient, queryPar
 			repository := getStringArg(args, "repository")
 			limit := getIntArg(args, "limit", 20)
 
-			extra := []string{}
-			if severity != "" {
-				extra = append(extra, "severity", severity)
-			}
-			if status != "" {
-				extra = append(extra, "status", status)
-			}
-			if repository != "" {
-				extra = append(extra, "repository", repository)
-			}
-			extra = append(extra, "limit", fmt.Sprintf("%d", limit))
-			qs := buildQueryString(queryParams, extra...)
-
+			// searchResult reports per type, because the endpoints do not all
+			// support the same filters. UnappliedFilters names the ones that
+			// type's results are NOT narrowed by, so a caller never mistakes an
+			// unfiltered page for a filtered one.
 			type searchResult struct {
-				Type  string          `json:"type"`
-				Error string          `json:"error,omitempty"`
-				Data  json.RawMessage `json:"data,omitempty"`
+				Type             string          `json:"type"`
+				Error            string          `json:"error,omitempty"`
+				UnappliedFilters []string        `json:"unapplied_filters,omitempty"`
+				Data             json.RawMessage `json:"data,omitempty"`
 			}
 
 			// Determine which types to query
@@ -114,17 +106,35 @@ func registerUnifiedTools(s *server.MCPServer, c *client.NullifyClient, queryPar
 				types = []string{typeName}
 			}
 
+			filterArgs := map[string]any{
+				"repository": repository,
+				"severity":   severity,
+				"status":     status,
+			}
+
 			var results []searchResult
 			for _, t := range types {
 				cfg := findingTypes[t]
-				result, err := doGet(ctx, c, cfg.basePath+qs)
+
+				translated, unapplied, err := translateListFilters(ctx, c, cfg.basePath, filterArgs, queryParams)
 				if err != nil {
 					results = append(results, searchResult{Type: t, Error: err.Error()})
 					continue
 				}
+
+				extra := append([]string{"limit", fmt.Sprintf("%d", limit)}, translated...)
+				result, err := doGet(ctx, c, cfg.basePath+buildQueryString(queryParams, extra...))
+				if err != nil {
+					results = append(results, searchResult{Type: t, Error: err.Error(), UnappliedFilters: unapplied})
+					continue
+				}
 				if len(result.Content) > 0 {
 					if tc, ok := result.Content[0].(mcp.TextContent); ok {
-						results = append(results, searchResult{Type: t, Data: json.RawMessage(tc.Text)})
+						results = append(results, searchResult{
+							Type:             t,
+							UnappliedFilters: unapplied,
+							Data:             json.RawMessage(tc.Text),
+						})
 					}
 				}
 			}
