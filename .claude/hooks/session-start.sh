@@ -96,4 +96,15 @@ if ! golangci-lint version 2>/dev/null | grep -q "version ${GOLANGCI_LINT_VERSIO
     go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
 fi
 
+# ============================================================
+# 3. MCP credential preflight — report-only
+# ============================================================
+
+# Expired credentials make a server expose no tools, or list every tool and
+# fail each call. Neither is visible without looking, so surface it here
+# instead of leaving it to be noticed when a report comes back empty.
+# Never fails the hook: the session is still usable with a degraded server.
+echo "--- MCP preflight ---"
+.claude/mcp/preflight.sh || true
+
 echo "Session start hook completed: secrets resolved, MCP servers installed, Go toolchain ready."

@@ -19,4 +19,15 @@ if [ -n "${NULLIFY_CREDENTIALS_JSON:-}" ] && [ ! -s "$HOME/.nullify/credentials.
 fi
 unset NULLIFY_CREDENTIALS_JSON
 
+# Seed config.json too. 'mcp serve' reads NULLIFY_HOST directly, but leaving
+# config.json absent means anyone debugging inside the container gets
+# "Not configured" from 'nullify auth status' even though the credentials are
+# right there - which is exactly the wrong signal when auth is what's broken.
+if [ -n "${NULLIFY_HOST:-}" ] && [ ! -s "$HOME/.nullify/config.json" ]; then
+  mkdir -p "$HOME/.nullify"
+  chmod 700 "$HOME/.nullify"
+  printf '{\n  "host": "%s"\n}\n' "$NULLIFY_HOST" > "$HOME/.nullify/config.json"
+  chmod 600 "$HOME/.nullify/config.json"
+fi
+
 exec go run ./cmd/cli mcp serve
