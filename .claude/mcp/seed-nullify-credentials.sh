@@ -34,7 +34,18 @@ creds="$creds_dir/credentials.json"
 project="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
 if [ -z "${NULLIFY_CREDENTIALS_JSON:-}" ]; then
-  [ -s "$creds" ] || log "no NULLIFY_CREDENTIALS_JSON and no stored credentials"
+  # Say so even when a credentials file exists. An empty value here means the
+  # vault lookup produced nothing — a renamed field, a duplicate label that
+  # makes 'op read' ambiguous, a vault the service account cannot see — and
+  # staying quiet about it turns a broken vault into a silent no-op that looks
+  # exactly like a healthy run.
+  if [ -s "$creds" ]; then
+    log "NULLIFY_CREDENTIALS_JSON is empty — vault lookup failed; falling back" \
+        "to the stored credentials, which may be stale. Check:" \
+        "op read \"op://${CLAUDE_OP_VAULT:-Claude}/${CLAUDE_OP_ITEM:-cloud-session-env}/NULLIFY_CREDENTIALS_JSON\""
+  else
+    log "no NULLIFY_CREDENTIALS_JSON and no stored credentials"
+  fi
   exit 0
 fi
 
