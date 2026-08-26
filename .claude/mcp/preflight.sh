@@ -107,9 +107,8 @@ check_latent_defense() {
     return
   fi
 
-  local probe out count body
-  probe='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"whoami","arguments":{}}}'
-  out="$(mcp_exchange "$probe" latent-defense-mcp)"
+  local out count
+  out="$(mcp_exchange "" latent-defense-mcp)"
   count="$(printf '%s\n' "$out" | json_lines | tool_count)"
 
   if [ "${count:-0}" -eq 0 ]; then
@@ -117,19 +116,35 @@ check_latent_defense() {
     return
   fi
 
-  body="$(printf '%s\n' "$out" | json_lines \
-    | jq -rs 'map(select(.id == 3)) | (.[0].result.content[0].text // "")' 2>/dev/null)"
-
-  if [ -z "$body" ]; then
-    warn "$name" "$count tools, but whoami did not answer within ${TIMEOUT}s"
+  # Probe the portal directly rather than calling the server's whoami tool.
+  # whoami falls back to the interactive device flow on a 401 and blocks until
+  # the timeout, which turns a definite "key rejected" into an inconclusive
+  # hang. One HTTP call answers the same question in under a second.
+  if [ -z "${LATENT_DEFENSE_URL:-}" ]; then
+    warn "$name" "$count tools, but LATENT_DEFENSE_URL is unset - cannot verify authorization"
+    return
+  fi
+  if [ -z "${LATENT_DEFENSE_API_KEY:-}" ]; then
+    fail "$name" "$count tools but LATENT_DEFENSE_API_KEY is unset - every call will be unauthorized"
     return
   fi
 
-  if printf '%s' "$body" | jq -e '.authenticated == true' >/dev/null 2>&1; then
-    pass "$name" "$count tools, authenticated"
-  else
-    fail "$name" "$count tools but UNAUTHORIZED - rotate LATENT_DEFENSE_API_KEY (tools will return empty results)"
-  fi
+  local code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -m 25 \
+    -H "Authorization: Bearer ${LATENT_DEFENSE_API_KEY}" \
+    -H "Accept: application/json" \
+    "${LATENT_DEFENSE_URL%/}/auth/me" 2>/dev/null)"
+
+  case "$code" in
+    200)
+      pass "$name" "$count tools, authenticated" ;;
+    401|403)
+      fail "$name" "$count tools but key REJECTED (HTTP $code) - rotate LATENT_DEFENSE_API_KEY; tools return empty results, not errors" ;;
+    "")
+      warn "$name" "$count tools, but ${LATENT_DEFENSE_URL} was unreachable" ;;
+    *)
+      warn "$name" "$count tools, unexpected HTTP $code from /auth/me" ;;
+  esac
 }
 
 # ------------------------------------------------------------------
