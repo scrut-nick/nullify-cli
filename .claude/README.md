@@ -18,9 +18,20 @@ Everything else is read from a 1Password item whose field names match the env
 var names — vault `Claude`, item `cloud-session-env` by default, overridable
 with `CLAUDE_OP_VAULT` / `CLAUDE_OP_ITEM`.
 
+**Check those two variables before editing anything in the vault** — this
+environment overrides both, so the defaults above are not where secrets are
+read from, and a value saved to the default location has no effect:
+
+```sh
+echo "${CLAUDE_OP_VAULT:-Claude} / ${CLAUDE_OP_ITEM:-cloud-session-env}"
+op vault list          # the service account may only see one vault
+```
+
 Fields read: `NULLIFY_HOST`, `NULLIFY_CREDENTIALS_JSON`,
 `PURPLEMCP_CONSOLE_TOKEN`, `PURPLEMCP_CONSOLE_BASE_URL`, `LATENT_DEFENSE_URL`,
-`LATENT_DEFENSE_API_KEY`.
+`LATENT_DEFENSE_API_KEY`. Field labels must match those names exactly — a
+field named something else is simply never read, and the variable falls back
+to whatever `.mcp.json` defaults it to (or stays empty).
 
 `NULLIFY_TOKEN` is deliberately **not** resolved: setting it would override the
 stored credentials and disable the CLI's refresh flow.
