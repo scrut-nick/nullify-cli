@@ -226,6 +226,7 @@ func init() {
 }
 
 func resolveHostForAuth(ctx context.Context) string {
+	// 1. Flag takes priority
 	if host != "" {
 		sanitized, err := lib.SanitizeNullifyHost(host)
 		if err != nil {
@@ -235,6 +236,23 @@ func resolveHostForAuth(ctx context.Context) string {
 		return sanitized
 	}
 
+	// 2. Env var (takes precedence over config file, matching resolveHost).
+	// Without this, 'auth token' and 'auth status' are the only commands that
+	// ignore NULLIFY_HOST, so they fail on hosts that have no config file —
+	// which is how the MCP server runs in ephemeral containers.
+	if envHost := os.Getenv("NULLIFY_HOST"); envHost != "" {
+		sanitized, err := lib.SanitizeNullifyHost(envHost)
+		if err == nil {
+			return sanitized
+		}
+		logger.L(ctx).Warn(
+			"NULLIFY_HOST env var is invalid, falling through to config",
+			logger.String("host", envHost),
+			logger.Err(err),
+		)
+	}
+
+	// 3. Read from config file
 	cfg, err := auth.LoadConfig()
 	if err == nil && cfg.Host != "" {
 		sanitized, sErr := lib.SanitizeNullifyHost(cfg.Host)
@@ -243,7 +261,7 @@ func resolveHostForAuth(ctx context.Context) string {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Error: no host configured. Use --host or run 'nullify auth login'")
+	fmt.Fprintln(os.Stderr, "Error: no host configured. Use --host, set NULLIFY_HOST, or run 'nullify auth login'")
 	os.Exit(1)
 	return ""
 }

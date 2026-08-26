@@ -25,10 +25,14 @@ cd "$CLAUDE_PROJECT_DIR"
 if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
   if ! command -v op >/dev/null 2>&1; then
     OP_CLI_VERSION="v2.31.1"
+    # Unpack elsewhere and rename into place: an MCP server's with-op-env.sh
+    # may be installing the same binary right now, and a half-written op on
+    # PATH is worse than a missing one.
     curl -sSfLo /tmp/op.zip \
       "https://cache.agilebits.com/dist/1P/op2/pkg/${OP_CLI_VERSION}/op_linux_amd64_${OP_CLI_VERSION}.zip" \
-      && unzip -oq /tmp/op.zip -d /usr/local/bin op \
-      && chmod +x /usr/local/bin/op \
+      && unzip -oq /tmp/op.zip -d /tmp/op-hook op \
+      && install -m 0755 "/tmp/op-hook/op" "/usr/local/bin/.op.hook.$$" \
+      && mv -f "/usr/local/bin/.op.hook.$$" /usr/local/bin/op \
       || echo "warning: could not install 1Password CLI — allow cache.agilebits.com in the environment's network policy" >&2
   fi
   if command -v op >/dev/null 2>&1; then
@@ -38,16 +42,11 @@ if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     # Seed the Nullify CLI credentials file so its built-in refresh flow
     # mints fresh access tokens (an env NULLIFY_TOKEN would override stored
     # credentials in the CLI, so that var is deliberately NOT resolved here).
-    if [ ! -s "$HOME/.nullify/credentials.json" ]; then
-      nullify_creds="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_CREDENTIALS_JSON" 2>/dev/null || true)"
-      if [ -n "$nullify_creds" ]; then
-        mkdir -p "$HOME/.nullify"
-        chmod 700 "$HOME/.nullify"
-        printf '%s' "$nullify_creds" > "$HOME/.nullify/credentials.json"
-        chmod 600 "$HOME/.nullify/credentials.json"
-        unset nullify_creds
-      fi
-    fi
+    # --no-probe keeps the hook fast: it only fills in a missing file. The MCP
+    # launcher runs the same script with the probe enabled, so credentials that
+    # have gone stale are replaced when the server actually starts.
+    NULLIFY_CREDENTIALS_JSON="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_CREDENTIALS_JSON" 2>/dev/null || true)" \
+      "$CLAUDE_PROJECT_DIR/.claude/mcp/seed-nullify-credentials.sh" --no-probe
 
     for var in NULLIFY_HOST \
                PURPLEMCP_CONSOLE_TOKEN PURPLEMCP_CONSOLE_BASE_URL \

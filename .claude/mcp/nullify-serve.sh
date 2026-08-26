@@ -7,16 +7,15 @@
 # refresh flow mint fresh access tokens for the refresh token's lifetime
 # (~30 days), instead of relying on a static hourly token.
 #
+# seed-nullify-credentials.sh decides whether to write the file: it keeps
+# credentials the CLI has refreshed on its own, and replaces ones the CLI can
+# no longer use. See that script for why both halves matter.
+#
 # NOTE: an env NULLIFY_TOKEN overrides stored credentials in the CLI - do not
 # set it anywhere (environment settings or 1Password) when using this flow.
 set -uo pipefail
 
-if [ -n "${NULLIFY_CREDENTIALS_JSON:-}" ] && [ ! -s "$HOME/.nullify/credentials.json" ]; then
-  mkdir -p "$HOME/.nullify"
-  chmod 700 "$HOME/.nullify"
-  printf '%s' "$NULLIFY_CREDENTIALS_JSON" > "$HOME/.nullify/credentials.json"
-  chmod 600 "$HOME/.nullify/credentials.json"
-fi
+"$(dirname "${BASH_SOURCE[0]}")/seed-nullify-credentials.sh"
 unset NULLIFY_CREDENTIALS_JSON
 
 exec go run ./cmd/cli mcp serve

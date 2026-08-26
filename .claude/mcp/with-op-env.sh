@@ -22,19 +22,32 @@ for var in "${vars[@]}"; do
   [ -z "${!var:-}" ] && missing=1
 done
 
-if [ "$missing" -eq 1 ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-  # The session-start hook installs op asynchronously; wait briefly, then
-  # install it ourselves rather than missing the MCP startup window.
-  for _ in $(seq 1 10); do
-    command -v op >/dev/null 2>&1 && break
-    sleep 2
+# Wait for a command the session-start hook installs asynchronously. Polling
+# finely matters here: MCP startup is measured in seconds, and a 2s tick spent
+# most of its time waiting on something that had already arrived.
+wait_for() { # wait_for <command> <max-seconds>
+  local ticks=$(( $2 * 2 ))
+  while [ "$ticks" -gt 0 ]; do
+    command -v "$1" >/dev/null 2>&1 && return 0
+    sleep 0.5
+    ticks=$(( ticks - 1 ))
   done
-  if ! command -v op >/dev/null 2>&1; then
+  command -v "$1" >/dev/null 2>&1
+}
+
+if [ "$missing" -eq 1 ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+  # The session-start hook installs op asynchronously; give it a moment, then
+  # install it ourselves rather than missing the MCP startup window.
+  if ! wait_for op 6; then
     OP_CLI_VERSION="v2.31.1"
+    # Unpack elsewhere and rename into place: the hook may be installing the
+    # same binary right now, and a half-written op on PATH is worse than a
+    # missing one.
     curl -sSfLo /tmp/op-mcp.zip \
       "https://cache.agilebits.com/dist/1P/op2/pkg/${OP_CLI_VERSION}/op_linux_amd64_${OP_CLI_VERSION}.zip" \
-      && unzip -oq /tmp/op-mcp.zip -d /usr/local/bin op \
-      && chmod +x /usr/local/bin/op \
+      && unzip -oq /tmp/op-mcp.zip -d /tmp/op-mcp op \
+      && install -m 0755 "/tmp/op-mcp/op" "/usr/local/bin/.op.$$" \
+      && mv -f "/usr/local/bin/.op.$$" /usr/local/bin/op \
       || true
   fi
   if command -v op >/dev/null 2>&1; then
@@ -54,9 +67,6 @@ if [ "$missing" -eq 1 ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
 fi
 
 # The target command may also be installed by the async hook; wait briefly
-for _ in $(seq 1 45); do
-  command -v "$1" >/dev/null 2>&1 && break
-  sleep 2
-done
+wait_for "$1" 90 || true
 
 exec "$@"
