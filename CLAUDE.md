@@ -75,8 +75,20 @@ This repo tracks `Nullify-Platform/cli`. When touching auth or the refreshing
 transport, check upstream first — its `internal/auth/login.go` documents the
 real contract of `GET /auth/refresh_token` (no token in the JSON body; the
 access token arrives only as a `Set-Cookie`, and the refresh token is **not**
-rotated). As of this writing upstream carries a fix this fork does not have:
-`fix(auth,client): cover token refresh with tests and repair the MCP 401 retry`
-(#165), which adds `ForceRefreshToken`, refresh backoff, and
-`ErrTokenNotRefreshable` for fixed token sources. Adopting it conflicts in
-`internal/client/` because this fork diverged there, so it needs its own change.
+rotated). This fork branched at upstream `#138`, so it is behind in the auth/client
+area. #165's behaviour has been ported by hand (401-triggered forced refresh,
+`ForceRefreshToken`, `RefreshNullifyToken`, `ErrTokenNotRefreshable`, and
+separate backoff clocks for the TTL and 401 paths), but these upstream changes
+are still missing:
+
+- **#159** — the GitHub PAT is still sent in the URL query string by
+  `internal/lib/get_token.go`, where it can land in access logs and proxies.
+  Upstream moved it into a POST body.
+- **#151** — an idempotency-aware retry: 5xx is only retried for idempotent
+  methods, so a POST that may already have committed is never replayed. Ours
+  replays any 5xx.
+- **#152 / #158** — MCP tools rebuilt on the generated API client, and the RunE
+  migration. Large behavioural changes; deliberately not adopted.
+
+Do not cherry-pick from upstream blind: the histories are unrelated, so a pick
+of any one commit pulls in dependencies this fork does not have.

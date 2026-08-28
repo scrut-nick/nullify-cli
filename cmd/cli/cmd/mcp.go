@@ -63,11 +63,17 @@ var mcpServeCmd = &cobra.Command{
 			os.Exit(1)
 		}
 
-		// Create a refreshing client for long-running MCP sessions
+		// Create a refreshing client for long-running MCP sessions.
+		// refreshProvider is deliberately distinct: tokenProvider serves the
+		// stored token while it still looks valid, so reusing it for the 401
+		// retry would replay the token the server just rejected.
 		tokenProvider := func() (string, error) {
 			return lib.GetNullifyToken(ctx, authCtx.Host, nullifyToken, githubToken)
 		}
-		nullifyClient, clientErr := client.NewRefreshingNullifyClient(authCtx.Host, tokenProvider)
+		refreshProvider := func() (string, error) {
+			return lib.RefreshNullifyToken(ctx, authCtx.Host, nullifyToken, githubToken)
+		}
+		nullifyClient, clientErr := client.NewRefreshingNullifyClient(authCtx.Host, tokenProvider, refreshProvider)
 		if clientErr != nil {
 			fmt.Fprintf(os.Stderr, "Error: failed to create client: %v\n", clientErr)
 			os.Exit(1)
