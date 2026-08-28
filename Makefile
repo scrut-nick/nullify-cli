@@ -45,3 +45,7 @@ cov:
 	-gocover-cobertura < coverage.txt > coverage.xml
 	-go tool cover -html=coverage.txt -o coverage.html
 	-go tool cover -func=coverage.txt
+
+preflight: ## Verify every MCP server in .mcp.json starts AND is authorized
+	@.claude/mcp/preflight.sh
+.PHONY: preflight

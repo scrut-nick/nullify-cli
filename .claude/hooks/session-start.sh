@@ -111,6 +111,12 @@ fi
 # instead of leaving it to be noticed when a report comes back empty.
 # Never fails the hook: the session is still usable with a degraded server.
 echo "--- MCP preflight ---"
-.claude/mcp/preflight.sh || true
+if ! .claude/mcp/preflight.sh; then
+  echo
+  echo "!!  One or more MCP servers are UNUSABLE - see the table above."
+  echo "!!  Their tools may still be listed and will return empty results."
+  echo "!!  Do not read an empty result from those servers as 'nothing found'."
+  echo "!!  Machine-readable status: .claude/mcp/health.json"
+fi
 
 echo "Session start hook completed: secrets resolved, MCP servers installed, Go toolchain ready."

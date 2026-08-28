@@ -1,0 +1,51 @@
+{
+  "_comment": [
+    "Authorization probes for the MCP servers declared in .mcp.json.",
+    "",
+    "A handshake only proves a server started. Several of these servers will",
+    "start, advertise their whole tool set, and then answer every call with an",
+    "empty result or a 403 - which reads as 'healthy but quiet' rather than as",
+    "an outage. Each server therefore needs a probe that proves the credential",
+    "is actually accepted.",
+    "",
+    "preflight.sh reads the server list from .mcp.json, not from this file. A",
+    "server present there but missing here is reported UNCHECKED rather than",
+    "skipped, so adding a server cannot quietly add a blind spot.",
+    "",
+    "kinds:",
+    "  http        GET url_env + path with the key in an Authorization header;",
+    "              ok_status means authorized. Pick an endpoint that returns",
+    "              data, and verify it answers differently without the key.",
+    "  jwt-env     Inspect a JWT in var: reject expired, and reject any",
+    "              token_use in reject_token_use. Opaque tokens pass through.",
+    "  env-present Assert vars are non-empty. Weakest kind - only for servers",
+    "              with no cheap authenticated endpoint."
+  ],
+
+  "probes": {
+    "nullify": {
+      "kind": "jwt-env",
+      "var": "NULLIFY_TOKEN",
+      "reject_token_use": ["id"],
+      "fallback_file": "~/.nullify/credentials.json",
+      "hint": "set NULLIFY_TOKEN to an API token that does not expire, or seed NULLIFY_CREDENTIALS_JSON"
+    },
+
+    "latent-defense": {
+      "kind": "http",
+      "url_env": "LATENT_DEFENSE_URL",
+      "path": "/api/infra/records",
+      "key_env": "LATENT_DEFENSE_API_KEY",
+      "ok_status": "200",
+      "hint": "rotate LATENT_DEFENSE_API_KEY in the secret store",
+      "_note": "Deliberately NOT /auth/me: that endpoint serves device-flow sessions and answers 401 to a valid API key, which once produced a six-day false outage."
+    },
+
+    "sentinelone": {
+      "kind": "env-present",
+      "vars": ["PURPLEMCP_CONSOLE_TOKEN", "PURPLEMCP_CONSOLE_BASE_URL"],
+      "hint": "set PURPLEMCP_CONSOLE_TOKEN and PURPLEMCP_CONSOLE_BASE_URL",
+      "_note": "The console exposes no unauthenticated health endpoint, so presence is the strongest cheap check available."
+    }
+  }
+}
