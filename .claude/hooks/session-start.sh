@@ -68,6 +68,20 @@ if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
   fi
 fi
 
+# Load what we just resolved into this hook's own environment. The lines above
+# are appended to $CLAUDE_ENV_FILE for the session's shells, but nothing reads
+# that file back here - and step 3 below runs preflight, whose probes read the
+# credentials straight from the environment. Without this the probes always saw
+# them unset and wrote a health.json marking healthy servers FAIL/WARN. That is
+# the same false alarm the probes exist to prevent, and it trains readers to
+# ignore the one file that is supposed to tell them when data is really absent.
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -f "$CLAUDE_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$CLAUDE_ENV_FILE"
+  set +a
+fi
+
 # --- MCP servers (vendored in third_party/, wired up in .mcp.json) ---
 
 # Latent Defense: install the vendored package into an isolated uv tool env

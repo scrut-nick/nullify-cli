@@ -47,15 +47,14 @@ func registerCompositeTools(s *server.MCPServer, c *client.NullifyClient, queryP
 					results = append(results, findingCount{Type: ep.name, Error: err.Error()})
 					continue
 				}
-				// Extract the text content from the result
-				if len(result.Content) > 0 {
-					if tc, ok := result.Content[0].(mcp.TextContent); ok {
-						results = append(results, findingCount{Type: ep.name, Data: json.RawMessage(tc.Text)})
-					}
-				}
+				data, errText := aggregatePayload(result)
+				results = append(results, findingCount{Type: ep.name, Data: data, Error: errText})
 			}
 
-			summaryJSON, _ := json.MarshalIndent(results, "", "  ")
+			summaryJSON, err := json.MarshalIndent(results, "", "  ")
+			if err != nil {
+				return toolError(fmt.Errorf("encoding posture summary: %w", err)), nil
+			}
 			return toolResult(string(summaryJSON)), nil
 		},
 	)

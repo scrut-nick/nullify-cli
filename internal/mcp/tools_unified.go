@@ -122,14 +122,14 @@ func registerUnifiedTools(s *server.MCPServer, c *client.NullifyClient, queryPar
 					results = append(results, searchResult{Type: t, Error: err.Error()})
 					continue
 				}
-				if len(result.Content) > 0 {
-					if tc, ok := result.Content[0].(mcp.TextContent); ok {
-						results = append(results, searchResult{Type: t, Data: json.RawMessage(tc.Text)})
-					}
-				}
+				data, errText := aggregatePayload(result)
+				results = append(results, searchResult{Type: t, Data: data, Error: errText})
 			}
 
-			out, _ := json.MarshalIndent(results, "", "  ")
+			out, err := json.MarshalIndent(results, "", "  ")
+			if err != nil {
+				return toolError(fmt.Errorf("encoding search results: %w", err)), nil
+			}
 			return toolResult(string(out)), nil
 		},
 	)

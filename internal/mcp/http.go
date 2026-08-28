@@ -89,3 +89,50 @@ func makeGetByIDHandler(c *client.NullifyClient, basePath string, queryParams ma
 		return doGet(ctx, c, fmt.Sprintf("%s/%s%s", basePath, url.PathEscape(id), qs))
 	}
 }
+
+// resultText returns the first text block of a tool result, or "" if there is
+// none.
+func resultText(result *mcp.CallToolResult) string {
+	if result != nil && len(result.Content) > 0 {
+		if tc, ok := result.Content[0].(mcp.TextContent); ok {
+			return tc.Text
+		}
+	}
+	return ""
+}
+
+// aggregatePayload splits one sub-request's result into a JSON payload and an
+// error string, for the handlers that merge several endpoints into a single
+// document.
+//
+// doRequest reports a non-2xx as a *result* holding plain text ("Error: API
+// returned 500: ..."), not as a Go error, so the caller's err is nil. Storing
+// that text in a json.RawMessage makes the enclosing json.Marshal fail, and the
+// aggregating handlers used to discard that error - collapsing the whole
+// document to an empty string. One sick endpoint therefore erased every healthy
+// one, and an empty security report is indistinguishable from "nothing found",
+// which is the exact confusion this repository exists to prevent. Route
+// anything that is not valid JSON into the error field instead, so the
+// remaining endpoints still report and the failure is named.
+func aggregatePayload(result *mcp.CallToolResult) (json.RawMessage, string) {
+	text := resultText(result)
+	switch {
+	case text == "":
+		return nil, "no content in response"
+	case result.IsError:
+		return nil, text
+	case !json.Valid([]byte(text)):
+		return nil, fmt.Sprintf("response was not valid JSON: %s", truncateText(text, 300))
+	default:
+		return json.RawMessage(text), ""
+	}
+}
+
+// truncateText caps text at max bytes so one malformed body cannot swamp the
+// surrounding report.
+func truncateText(text string, max int) string {
+	if len(text) <= max {
+		return text
+	}
+	return text[:max] + "... (truncated)"
+}

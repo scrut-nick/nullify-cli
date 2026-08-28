@@ -11,15 +11,6 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-func resourceText(result *mcplib.CallToolResult) string {
-	if result != nil && len(result.Content) > 0 {
-		if tc, ok := result.Content[0].(mcplib.TextContent); ok {
-			return tc.Text
-		}
-	}
-	return ""
-}
-
 func registerResources(s *server.MCPServer, c *client.NullifyClient, queryParams map[string]string) {
 	s.AddResource(
 		mcplib.Resource{
@@ -114,13 +105,14 @@ func registerResources(s *server.MCPServer, c *client.NullifyClient, queryParams
 					results = append(results, recentResult{Type: ep.name, Error: err.Error()})
 					continue
 				}
-				text := resourceText(result)
-				if text != "" {
-					results = append(results, recentResult{Type: ep.name, Data: json.RawMessage(text)})
-				}
+				data, errText := aggregatePayload(result)
+				results = append(results, recentResult{Type: ep.name, Data: data, Error: errText})
 			}
 
-			out, _ := json.MarshalIndent(results, "", "  ")
+			out, err := json.MarshalIndent(results, "", "  ")
+			if err != nil {
+				return nil, fmt.Errorf("encoding recent findings: %w", err)
+			}
 			return []mcplib.ResourceContents{
 				mcplib.TextResourceContents{
 					URI:      "nullify://recent-findings",
@@ -149,7 +141,7 @@ func registerResources(s *server.MCPServer, c *client.NullifyClient, queryParams
 				mcplib.TextResourceContents{
 					URI:      "nullify://config",
 					MIMEType: "application/json",
-					Text:     resourceText(result),
+					Text:     resultText(result),
 				},
 			}, nil
 		},
