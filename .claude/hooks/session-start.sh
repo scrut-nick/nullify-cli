@@ -35,10 +35,16 @@ if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     OP_VAULT="${CLAUDE_OP_VAULT:-Claude}"
     OP_ITEM="${CLAUDE_OP_ITEM:-cloud-session-env}"
 
-    # Seed the Nullify CLI credentials file so its built-in refresh flow
-    # mints fresh access tokens (an env NULLIFY_TOKEN would override stored
-    # credentials in the CLI, so that var is deliberately NOT resolved here).
-    if [ ! -s "$HOME/.nullify/credentials.json" ]; then
+    # Nullify accepts either a long-lived NULLIFY_TOKEN or a seeded
+    # credentials file. Prefer the token: it needs no refresh cycle and no
+    # browser, so it survives an ephemeral container, whereas a seeded refresh
+    # token ages out and its renewals die with the container. Seed the file
+    # only when no token is configured, since the CLI would ignore it anyway.
+    nullify_token="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_TOKEN" 2>/dev/null || true)"
+    if [ -n "$nullify_token" ]; then
+      printf 'export %s=%q\n' "NULLIFY_TOKEN" "$nullify_token" >> "$CLAUDE_ENV_FILE"
+      unset nullify_token
+    elif [ ! -s "$HOME/.nullify/credentials.json" ]; then
       nullify_creds="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_CREDENTIALS_JSON" 2>/dev/null || true)"
       if [ -n "$nullify_creds" ]; then
         mkdir -p "$HOME/.nullify"

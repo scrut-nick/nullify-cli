@@ -10,9 +10,18 @@
 # with CLAUDE_OP_VAULT / CLAUDE_OP_ITEM (item ID works too).
 set -uo pipefail
 
+# A var may be marked optional by prefixing it with "?". Optional vars are
+# still resolved from 1Password, but their absence is not reported: they exist
+# for servers that accept more than one credential model, where exactly one of
+# several vars is expected to be present and the server itself decides which
+# it got. Everything without the prefix is required, as before.
 vars=()
+required=()
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do
-  vars+=("$1")
+  case "$1" in
+    '?'*) vars+=("${1#\?}") ;;
+    *)    vars+=("$1"); required+=("$1") ;;
+  esac
   shift
 done
 shift || true
@@ -59,7 +68,7 @@ fi
 # the gap here is the difference between a five-minute fix and an outage that
 # survives until someone audits tool coverage by hand.
 still_missing=()
-for var in "${vars[@]}"; do
+for var in "${required[@]}"; do
   [ -z "${!var:-}" ] && still_missing+=("$var")
 done
 

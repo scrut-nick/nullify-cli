@@ -1,21 +1,45 @@
 #!/bin/bash
-# Start the Nullify MCP server with auto-refreshing credentials.
+# Start the Nullify MCP server, accepting either credential model.
 #
-# NULLIFY_CREDENTIALS_JSON (resolved from 1Password by with-op-env.sh) holds
-# the contents of ~/.nullify/credentials.json from a machine where
-# 'nullify auth login' was run. Seeding that file lets the CLI's built-in
-# refresh flow mint fresh access tokens for the refresh token's lifetime
-# (~30 days), instead of relying on a static hourly token.
+# NULLIFY_TOKEN (preferred for cloud sessions)
+#   A long-lived API token. The CLI uses it directly, so there is no refresh
+#   cycle to go stale and nothing to mint through a browser. This is the right
+#   model for an ephemeral container: the token in the secret store is the only
+#   state, and it stays valid until it is deliberately rotated.
 #
-# NOTE: an env NULLIFY_TOKEN overrides stored credentials in the CLI - do not
-# set it anywhere (environment settings or 1Password) when using this flow.
+# NULLIFY_CREDENTIALS_JSON (fallback)
+#   The contents of ~/.nullify/credentials.json from a machine where
+#   'nullify auth login' was run. Seeding it lets the CLI's refresh flow mint
+#   access tokens for the refresh token's lifetime (~30 days). The catch is
+#   that refreshes are written to the container's filesystem and lost when it
+#   exits, so the stored copy ages out and eventually stops working - at which
+#   point a human has to re-run an interactive browser login.
+#
+# NULLIFY_TOKEN wins when both are present: the CLI would prefer it anyway
+# (it outranks stored credentials), so seeding a file we would not read only
+# creates a second thing to keep in sync.
 set -uo pipefail
 
-if [ -n "${NULLIFY_CREDENTIALS_JSON:-}" ] && [ ! -s "$HOME/.nullify/credentials.json" ]; then
-  mkdir -p "$HOME/.nullify"
-  chmod 700 "$HOME/.nullify"
-  printf '%s' "$NULLIFY_CREDENTIALS_JSON" > "$HOME/.nullify/credentials.json"
-  chmod 600 "$HOME/.nullify/credentials.json"
+if [ -n "${NULLIFY_TOKEN:-}" ]; then
+  echo "nullify-serve: authenticating with NULLIFY_TOKEN" >&2
+else
+  if [ -n "${NULLIFY_CREDENTIALS_JSON:-}" ] && [ ! -s "$HOME/.nullify/credentials.json" ]; then
+    mkdir -p "$HOME/.nullify"
+    chmod 700 "$HOME/.nullify"
+    printf '%s' "$NULLIFY_CREDENTIALS_JSON" > "$HOME/.nullify/credentials.json"
+    chmod 600 "$HOME/.nullify/credentials.json"
+  fi
+
+  if [ -s "$HOME/.nullify/credentials.json" ]; then
+    echo "nullify-serve: authenticating with seeded credentials file" >&2
+  else
+    {
+      echo "nullify-serve: WARNING no Nullify credentials available."
+      echo "nullify-serve:   set NULLIFY_TOKEN (preferred) or NULLIFY_CREDENTIALS_JSON"
+      echo "nullify-serve:   in the 1Password item named by CLAUDE_OP_VAULT/CLAUDE_OP_ITEM."
+      echo "nullify-serve:   the server will start but expose no tools."
+    } >&2
+  fi
 fi
 unset NULLIFY_CREDENTIALS_JSON
 

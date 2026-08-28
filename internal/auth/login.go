@@ -287,6 +287,8 @@ func refreshToken(ctx context.Context, host string, refreshTok string) (string, 
 
 	var result struct {
 		AccessToken     string            `json:"accessToken"`
+		RefreshToken    string            `json:"refreshToken"`
+		RefreshTokenAlt string            `json:"refresh_token"`
 		ExpiresIn       int               `json:"expiresIn"`
 		QueryParameters map[string]string `json:"queryParameters"`
 	}
@@ -314,11 +316,36 @@ func refreshToken(ctx context.Context, host string, refreshTok string) (string, 
 		return "", fmt.Errorf("refresh returned empty access token")
 	}
 
+	// Keep a rotated refresh token if the server issued one. Providers that
+	// rotate on use invalidate the token we just sent, so re-saving the old
+	// one guarantees the next refresh fails with a 401 - and on an ephemeral
+	// container that failure is permanent, because the seeded copy in the
+	// secret store is never updated. Delivery mirrors the access token: JSON
+	// body first, Set-Cookie as the fallback. Absent means non-rotating, so
+	// carry the existing token forward.
+	rotated := result.RefreshToken
+	if rotated == "" {
+		rotated = result.RefreshTokenAlt
+	}
+	if rotated == "" {
+		for _, c := range resp.Cookies() {
+			if c.Name == "refresh_token" && c.Value != "" {
+				rotated = c.Value
+				break
+			}
+		}
+	}
+	if rotated == "" {
+		rotated = refreshTok
+	} else if rotated != refreshTok {
+		logger.L(ctx).Debug("server rotated the refresh token; persisting the new one")
+	}
+
 	expiresAt := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second).Unix()
 
 	err = SaveHostCredentials(host, HostCredentials{
 		AccessToken:     result.AccessToken,
-		RefreshToken:    refreshTok,
+		RefreshToken:    rotated,
 		ExpiresAt:       expiresAt,
 		QueryParameters: result.QueryParameters,
 	})

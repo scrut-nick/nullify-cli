@@ -74,12 +74,24 @@ check_nullify() {
     return
   fi
 
+  # Name the credential model in use, so a failure points at the right secret
+  # instead of leaving someone to guess which of the two is live.
+  local mode
+  if [ -n "${NULLIFY_TOKEN:-}" ]; then
+    mode="NULLIFY_TOKEN"
+  elif [ -s "$HOME/.nullify/credentials.json" ]; then
+    mode="seeded credentials"
+  else
+    fail "$name" "no credentials at all - set NULLIFY_TOKEN (preferred for cloud) or NULLIFY_CREDENTIALS_JSON"
+    return
+  fi
+
   local out count
   out="$(NULLIFY_HOST="${NULLIFY_HOST:-scrut.nullify.ai}" mcp_exchange "" "$TMP_BIN" mcp serve)"
   count="$(printf '%s\n' "$out" | json_lines | tool_count)"
 
   if [ "${count:-0}" -gt 0 ]; then
-    pass "$name" "$count tools"
+    pass "$name" "$count tools, via $mode"
     return
   fi
 
@@ -87,11 +99,11 @@ check_nullify() {
   reason="$(stderr_reason)"
   case "$reason" in
     *"refresh failed"*|*"token expired"*|*"auth login"*)
-      fail "$name" "credentials rejected - re-seed NULLIFY_CREDENTIALS_JSON. ($reason)" ;;
+      fail "$name" "$mode rejected - a seeded refresh token cannot be renewed from a container; set NULLIFY_TOKEN instead. ($reason)" ;;
     "")
-      fail "$name" "exposed no tools and gave no error" ;;
+      fail "$name" "exposed no tools and gave no error (using $mode)" ;;
     *)
-      fail "$name" "$reason" ;;
+      fail "$name" "$reason (using $mode)" ;;
   esac
 }
 

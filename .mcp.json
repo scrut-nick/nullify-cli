@@ -4,7 +4,7 @@
       "command": "bash",
       "args": [
         ".claude/mcp/with-op-env.sh",
-        "NULLIFY_CREDENTIALS_JSON",
+        "?NULLIFY_TOKEN", "?NULLIFY_CREDENTIALS_JSON",
         "--",
         "bash", ".claude/mcp/nullify-serve.sh"
       ],
