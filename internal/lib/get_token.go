@@ -22,14 +22,41 @@ type githubToken struct {
 	Token string `json:"accessToken"`
 }
 
+// GetNullifyToken resolves a token from the first source that has one.
 func GetNullifyToken(
 	ctx context.Context,
 	nullifyHost string,
 	nullifyTokenFlag string,
 	githubTokenFlag string,
 ) (string, error) {
+	return resolveNullifyToken(ctx, nullifyHost, nullifyTokenFlag, githubTokenFlag, false)
+}
+
+// RefreshNullifyToken resolves a token that is genuinely new, for recovering
+// from a 401. Sources that yield a fixed string - the --nullify-token flag and
+// NULLIFY_TOKEN - report client.ErrTokenNotRefreshable rather than handing back
+// the value the server just rejected, which would make the retry a no-op.
+func RefreshNullifyToken(
+	ctx context.Context,
+	nullifyHost string,
+	nullifyTokenFlag string,
+	githubTokenFlag string,
+) (string, error) {
+	return resolveNullifyToken(ctx, nullifyHost, nullifyTokenFlag, githubTokenFlag, true)
+}
+
+func resolveNullifyToken(
+	ctx context.Context,
+	nullifyHost string,
+	nullifyTokenFlag string,
+	githubTokenFlag string,
+	force bool,
+) (string, error) {
 	// 1. Command-line flag
 	if nullifyTokenFlag != "" {
+		if force {
+			return "", client.ErrTokenNotRefreshable
+		}
 		logger.L(ctx).Debug("using token from flag")
 		return nullifyTokenFlag, nil
 	}
@@ -37,6 +64,9 @@ func GetNullifyToken(
 	// 2. Environment variable
 	token := os.Getenv("NULLIFY_TOKEN")
 	if token != "" {
+		if force {
+			return "", client.ErrTokenNotRefreshable
+		}
 		logger.L(ctx).Debug("using token from env")
 		return token, nil
 	}
@@ -94,12 +124,22 @@ func GetNullifyToken(
 	}
 
 	// 4. Stored credentials from ~/.nullify/credentials.json
-	storedToken, err := auth.GetValidToken(ctx, nullifyHost)
+	resolve := auth.GetValidToken
+	if force {
+		// GetValidToken returns the stored token untouched while it still looks
+		// valid, so a token revoked mid-life would come back unchanged.
+		resolve = auth.ForceRefreshToken
+	}
+
+	storedToken, err := resolve(ctx, nullifyHost)
 	if err == nil && storedToken != "" {
 		logger.L(ctx).Debug("using token from stored credentials")
 		return storedToken, nil
 	}
 	if err != nil {
+		if errors.Is(err, auth.ErrNotRefreshable) {
+			return "", client.ErrTokenNotRefreshable
+		}
 		return "", fmt.Errorf("stored credentials: %w", err)
 	}
 

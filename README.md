@@ -287,6 +287,28 @@ Scope findings to a specific repository with `--repo`:
 }
 ```
 
+### Ephemeral and cloud environments
+
+In a container that is rebuilt for every session — Claude Code on the web, CI,
+a devcontainer — authenticate with a long-lived token rather than a copied
+credentials file:
+
+```sh
+export NULLIFY_HOST=acme.nullify.ai
+export NULLIFY_TOKEN=your-token-here
+```
+
+`NULLIFY_TOKEN` outranks stored credentials, needs no browser, and has no
+refresh cycle to go stale, so the token in your secret store is the only state
+to maintain.
+
+Copying a `~/.nullify/credentials.json` from a workstation also works, but it
+degrades over time: refreshed tokens are written to the container's filesystem
+and lost when it exits, so the stored copy never advances and eventually stops
+refreshing. When that happens the server exits at startup and appears in your
+client as a server with no tools. `nullify auth status` will report the expiry,
+and `nullify auth token` the underlying error.
+
 ## Configuration
 
 The CLI stores configuration at `~/.nullify/config.json`. Host resolution priority:

@@ -35,10 +35,16 @@ if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     OP_VAULT="${CLAUDE_OP_VAULT:-Claude}"
     OP_ITEM="${CLAUDE_OP_ITEM:-cloud-session-env}"
 
-    # Seed the Nullify CLI credentials file so its built-in refresh flow
-    # mints fresh access tokens (an env NULLIFY_TOKEN would override stored
-    # credentials in the CLI, so that var is deliberately NOT resolved here).
-    if [ ! -s "$HOME/.nullify/credentials.json" ]; then
+    # Nullify accepts either a long-lived NULLIFY_TOKEN or a seeded
+    # credentials file. Prefer the token: it needs no refresh cycle and no
+    # browser, so it survives an ephemeral container, whereas a seeded refresh
+    # token ages out and its renewals die with the container. Seed the file
+    # only when no token is configured, since the CLI would ignore it anyway.
+    nullify_token="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_TOKEN" 2>/dev/null || true)"
+    if [ -n "$nullify_token" ]; then
+      printf 'export %s=%q\n' "NULLIFY_TOKEN" "$nullify_token" >> "$CLAUDE_ENV_FILE"
+      unset nullify_token
+    elif [ ! -s "$HOME/.nullify/credentials.json" ]; then
       nullify_creds="$(op read "op://${OP_VAULT}/${OP_ITEM}/NULLIFY_CREDENTIALS_JSON" 2>/dev/null || true)"
       if [ -n "$nullify_creds" ]; then
         mkdir -p "$HOME/.nullify"
@@ -94,6 +100,23 @@ GO_VERSION="$(go mod edit -json | grep -oP '"Go":\s*"\K[0-9.]+')"
 if ! golangci-lint version 2>/dev/null | grep -q "version ${GOLANGCI_LINT_VERSION#v}.*go${GO_VERSION}"; then
   GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin \
     go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+fi
+
+# ============================================================
+# 3. MCP credential preflight — report-only
+# ============================================================
+
+# Expired credentials make a server expose no tools, or list every tool and
+# fail each call. Neither is visible without looking, so surface it here
+# instead of leaving it to be noticed when a report comes back empty.
+# Never fails the hook: the session is still usable with a degraded server.
+echo "--- MCP preflight ---"
+if ! .claude/mcp/preflight.sh; then
+  echo
+  echo "!!  One or more MCP servers are UNUSABLE - see the table above."
+  echo "!!  Their tools may still be listed and will return empty results."
+  echo "!!  Do not read an empty result from those servers as 'nothing found'."
+  echo "!!  Machine-readable status: .claude/mcp/health.json"
 fi
 
 echo "Session start hook completed: secrets resolved, MCP servers installed, Go toolchain ready."

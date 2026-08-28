@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -196,6 +197,32 @@ func GetValidToken(ctx context.Context, host string) (string, error) {
 	}
 
 	return hostCreds.AccessToken, nil
+}
+
+// ErrNotRefreshable reports that the stored credentials for a host carry no
+// refresh token, so no amount of retrying will produce a new access token.
+var ErrNotRefreshable = errors.New("no refresh token stored")
+
+// ForceRefreshToken exchanges the stored refresh token for a new access token
+// regardless of the recorded expiry. GetValidToken only refreshes once
+// ExpiresAt has elapsed, which means a token revoked mid-life is handed back
+// unchanged - so a 401 retry built on it would replay the same rejected value.
+func ForceRefreshToken(ctx context.Context, host string) (string, error) {
+	creds, err := LoadCredentials()
+	if err != nil {
+		return "", fmt.Errorf("not authenticated - run 'nullify auth login'")
+	}
+
+	hostCreds, ok := creds[CredentialKey(host)]
+	if !ok {
+		return "", fmt.Errorf("not authenticated for %s - run 'nullify auth login --host %s'", host, host)
+	}
+	if hostCreds.RefreshToken == "" {
+		return "", ErrNotRefreshable
+	}
+
+	logger.L(ctx).Debug("forcing access token refresh")
+	return refreshToken(ctx, host, hostCreds.RefreshToken)
 }
 
 func createCLISession(ctx context.Context, host string, port int) (*cliSessionResponse, error) {

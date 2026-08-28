@@ -33,15 +33,9 @@ var loginCmd = &cobra.Command{
 		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
-		loginHost := host
-
-		// If no host from flag, try config file
-		if loginHost == "" {
-			cfg, err := auth.LoadConfig()
-			if err == nil && cfg.Host != "" {
-				loginHost = cfg.Host
-			}
-		}
+		// Flag, then NULLIFY_HOST, then the config file - matching every other
+		// command's precedence - before falling back to an interactive prompt.
+		loginHost, _ := lookupHostForAuth(ctx)
 
 		// If still no host, prompt
 		if loginHost == "" {
@@ -88,18 +82,16 @@ var statusCmd = &cobra.Command{
 	Short: "Show authentication status",
 	Long:  "Display the current authentication state including host, user, and token expiry.",
 	Run: func(cmd *cobra.Command, args []string) {
-		cfg, err := auth.LoadConfig()
-		if err != nil {
+		ctx := setupLogger(cmd.Context())
+		defer logger.Close(ctx)
+
+		statusHost, ok := lookupHostForAuth(ctx)
+		if !ok {
 			fmt.Println("Not configured. Run 'nullify auth login --host <your-instance>.nullify.ai' to get started.")
 			return
 		}
 
-		if cfg.Host == "" {
-			fmt.Println("No host configured. Run 'nullify auth login --host <your-instance>.nullify.ai'")
-			return
-		}
-
-		fmt.Printf("Host: %s\n", cfg.Host)
+		fmt.Printf("Host: %s\n", statusHost)
 
 		creds, err := auth.LoadCredentials()
 		if err != nil {
@@ -107,7 +99,7 @@ var statusCmd = &cobra.Command{
 			return
 		}
 
-		hostCreds, ok := creds[auth.CredentialKey(cfg.Host)]
+		hostCreds, ok := creds[auth.CredentialKey(statusHost)]
 		if !ok {
 			fmt.Println("Status: not authenticated")
 			return
@@ -225,25 +217,58 @@ func init() {
 	authCmd.AddCommand(configShowCmd)
 }
 
-func resolveHostForAuth(ctx context.Context) string {
+// lookupHostForAuth resolves the host for the auth subcommands using the same
+// precedence as resolveHost: the --host flag, then NULLIFY_HOST, then the
+// config file. It reports absence to the caller rather than exiting so that
+// 'auth status' can print guidance instead of failing.
+//
+// Honouring NULLIFY_HOST matters for container and MCP deployments, where the
+// credentials file is seeded from a secret store and the host arrives purely
+// through the environment; without it these commands report "not configured"
+// on a host that every other command resolves fine.
+func lookupHostForAuth(ctx context.Context) (string, bool) {
 	if host != "" {
 		sanitized, err := lib.SanitizeNullifyHost(host)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: invalid host %q\n", host)
 			os.Exit(1)
 		}
-		return sanitized
+		return sanitized, true
+	}
+
+	if envHost := os.Getenv("NULLIFY_HOST"); envHost != "" {
+		sanitized, err := lib.SanitizeNullifyHost(envHost)
+		if err == nil {
+			return sanitized, true
+		}
+		logger.L(ctx).Warn(
+			"NULLIFY_HOST env var is invalid, falling through to config",
+			logger.String("host", envHost),
+			logger.Err(err),
+		)
 	}
 
 	cfg, err := auth.LoadConfig()
 	if err == nil && cfg.Host != "" {
 		sanitized, sErr := lib.SanitizeNullifyHost(cfg.Host)
 		if sErr == nil {
-			return sanitized
+			return sanitized, true
 		}
+		logger.L(ctx).Warn(
+			"config file host is invalid, ignoring",
+			logger.String("host", cfg.Host),
+			logger.Err(sErr),
+		)
 	}
 
-	fmt.Fprintln(os.Stderr, "Error: no host configured. Use --host or run 'nullify auth login'")
-	os.Exit(1)
-	return ""
+	return "", false
+}
+
+func resolveHostForAuth(ctx context.Context) string {
+	resolved, ok := lookupHostForAuth(ctx)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "Error: no host configured. Use --host, set NULLIFY_HOST, or run 'nullify auth login'")
+		os.Exit(1)
+	}
+	return resolved
 }

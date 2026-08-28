@@ -10,9 +10,18 @@
 # with CLAUDE_OP_VAULT / CLAUDE_OP_ITEM (item ID works too).
 set -uo pipefail
 
+# A var may be marked optional by prefixing it with "?". Optional vars are
+# still resolved from 1Password, but their absence is not reported: they exist
+# for servers that accept more than one credential model, where exactly one of
+# several vars is expected to be present and the server itself decides which
+# it got. Everything without the prefix is required, as before.
 vars=()
+required=()
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do
-  vars+=("$1")
+  case "$1" in
+    '?'*) vars+=("${1#\?}") ;;
+    *)    vars+=("$1"); required+=("$1") ;;
+  esac
   shift
 done
 shift || true
@@ -53,10 +62,37 @@ if [ "$missing" -eq 1 ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
   fi
 fi
 
+# Report anything still unresolved before handing over. A server started
+# without its credentials does not fail in a way anyone notices: it connects
+# and then exposes no tools, or answers every call "not authenticated". Naming
+# the gap here is the difference between a five-minute fix and an outage that
+# survives until someone audits tool coverage by hand.
+still_missing=()
+for var in "${required[@]}"; do
+  [ -z "${!var:-}" ] && still_missing+=("$var")
+done
+
+if [ "${#still_missing[@]}" -gt 0 ]; then
+  {
+    echo "with-op-env: WARNING starting '${1:-<none>}' with unresolved secrets: ${still_missing[*]}"
+    if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+      echo "with-op-env:   cause: OP_SERVICE_ACCOUNT_TOKEN is not set, so 1Password was never consulted."
+    else
+      echo "with-op-env:   looked up: op://${CLAUDE_OP_VAULT:-Claude}/${CLAUDE_OP_ITEM:-cloud-session-env}/<VAR>"
+      echo "with-op-env:   cause: those fields are missing from the item, or the service account cannot read them."
+    fi
+    echo "with-op-env:   expect this server to start but expose no working tools."
+  } >&2
+fi
+
 # The target command may also be installed by the async hook; wait briefly
 for _ in $(seq 1 45); do
   command -v "$1" >/dev/null 2>&1 && break
   sleep 2
 done
+
+if ! command -v "$1" >/dev/null 2>&1; then
+  echo "with-op-env: WARNING '$1' is not on PATH after waiting 90s; exec will fail." >&2
+fi
 
 exec "$@"
