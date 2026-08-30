@@ -314,6 +314,7 @@ func refreshToken(ctx context.Context, host string, refreshTok string) (string, 
 
 	var result struct {
 		AccessToken     string            `json:"accessToken"`
+		RefreshToken    string            `json:"refreshToken"`
 		ExpiresIn       int               `json:"expiresIn"`
 		QueryParameters map[string]string `json:"queryParameters"`
 	}
@@ -323,16 +324,21 @@ func refreshToken(ctx context.Context, host string, refreshTok string) (string, 
 		return "", err
 	}
 
-	// The endpoint delivers the new access token as a Set-Cookie header
-	// rather than in the JSON body; fall back to it when the body has none.
-	if result.AccessToken == "" {
-		for _, c := range resp.Cookies() {
-			if c.Name == "access_token" {
+	// The endpoint delivers the new tokens as Set-Cookie headers rather than
+	// in the JSON body; fall back to them when the body has none.
+	rotatedRefresh := result.RefreshToken
+	for _, c := range resp.Cookies() {
+		switch c.Name {
+		case "access_token":
+			if result.AccessToken == "" {
 				result.AccessToken = c.Value
 				if result.ExpiresIn == 0 && c.MaxAge > 0 {
 					result.ExpiresIn = c.MaxAge
 				}
-				break
+			}
+		case "refresh_token":
+			if rotatedRefresh == "" {
+				rotatedRefresh = c.Value
 			}
 		}
 	}
@@ -341,11 +347,24 @@ func refreshToken(ctx context.Context, host string, refreshTok string) (string, 
 		return "", fmt.Errorf("refresh returned empty access token")
 	}
 
+	// Upstream documents this endpoint as not rotating the refresh token, so
+	// the response normally carries none and re-storing the old value is
+	// correct. Do not depend on that. If the deployment does rotate, writing
+	// the old value back persists a token the server has just invalidated,
+	// and the failure surfaces much later - in a fresh container seeded from
+	// the secret store - as "invalid refresh token" with nothing left to
+	// explain it. Keep whichever token the server last acknowledged.
+	storedRefresh := refreshTok
+	if rotatedRefresh != "" && rotatedRefresh != refreshTok {
+		logger.L(ctx).Debug("refresh token rotated by server, persisting replacement")
+		storedRefresh = rotatedRefresh
+	}
+
 	expiresAt := time.Now().Add(time.Duration(result.ExpiresIn) * time.Second).Unix()
 
 	err = SaveHostCredentials(host, HostCredentials{
 		AccessToken:     result.AccessToken,
-		RefreshToken:    refreshTok,
+		RefreshToken:    storedRefresh,
 		ExpiresAt:       expiresAt,
 		QueryParameters: result.QueryParameters,
 	})

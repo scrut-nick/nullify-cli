@@ -18,6 +18,11 @@
     "              data, and verify it answers differently without the key.",
     "  jwt-env     Inspect a JWT in var: reject expired, and reject any",
     "              token_use in reject_token_use. Opaque tokens pass through.",
+    "              When var is unset, fallback_file is inspected under the same",
+    "              rules - an expired access token, an id token, or a missing",
+    "              refresh token are all named rather than reported as 'a file",
+    "              is present'. The refresh token itself is NOT spent to test",
+    "              it: that would consume the value the server process needs.",
     "  env-present Assert vars are non-empty. Weakest kind - only for servers",
     "              with no cheap authenticated endpoint."
   ],
@@ -28,7 +33,8 @@
       "var": "NULLIFY_TOKEN",
       "reject_token_use": ["id"],
       "fallback_file": "~/.nullify/credentials.json",
-      "hint": "set NULLIFY_TOKEN to an API token that does not expire, or seed NULLIFY_CREDENTIALS_JSON"
+      "hint": "set NULLIFY_TOKEN to an API token that does not expire, or re-seed NULLIFY_CREDENTIALS_JSON from a fresh 'nullify auth login'",
+      "_note": "A seeded credentials file is a decaying credential: the refresh token has its own lifetime, and only a live call can prove it is still accepted. Treat a WARN here as 'unverified', not 'fine'."
     },
 
     "latent-defense": {

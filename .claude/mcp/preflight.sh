@@ -93,15 +93,71 @@ handshake_tool_count() {
 
 # Last stderr line that looks like a cause rather than a banner.
 stderr_reason() {
-  grep -v '^[[:space:]]*$' "$STDERR_FILE" 2>/dev/null \
-    | grep -viE 'warning:|IncompleteFieldDefinition|warnings\.warn|INFO |Processing request|Starting MCP server|^ +' \
-    | tail -1 | cut -c1-150
+  local lines cause
+  lines="$(grep -v '^[[:space:]]*$' "$STDERR_FILE" 2>/dev/null \
+    | grep -viE 'warning:|IncompleteFieldDefinition|warnings\.warn|INFO |Processing request|Starting MCP server|^ +')"
+  # "exit status N" is the runner's epilogue and says nothing about why. Prefer
+  # the last line that names a cause, and fall back to it only when the process
+  # died without explaining itself.
+  cause="$(printf '%s\n' "$lines" | grep -vE '^exit status [0-9]+$' | tail -1)"
+  [ -z "$cause" ] && cause="$(printf '%s\n' "$lines" | tail -1)"
+  printf '%s' "$cause" | cut -c1-150
 }
 
 # ------------------------------------------------------------------- probes
 
 probe_field() {
   jq -r --arg s "$1" --arg f "$2" '.probes[$s][$f] // empty' "$PROBE_CONFIG" 2>/dev/null
+}
+
+# Inspect a seeded ~/.nullify/credentials.json. Without this, the fallback path
+# reports only that the file exists, which is how an expired access token and a
+# refresh token the server has already invalidated both read as "using
+# credentials.json" - right up until every call comes back empty.
+# echoes "<verdict>|<detail>"
+probe_credentials_file() {
+  local server="$1" file="$2" base host entry access refresh expires now when use reject
+  base="$(basename "$file")"
+  host="${NULLIFY_HOST:-}"; host="${host#api.}"
+
+  entry="$(jq -c --arg h "$host" \
+    'if ($h != "" and has($h)) then .[$h] else (to_entries | .[0].value // empty) end' \
+    "$file" 2>/dev/null)"
+  if [ -z "$entry" ] || [ "$entry" = "null" ]; then
+    echo "bad|$base has no credentials for ${host:-any host}"; return
+  fi
+
+  access="$(printf '%s' "$entry"  | jq -r '.access_token // empty')"
+  refresh="$(printf '%s' "$entry" | jq -r '.refresh_token // empty')"
+  expires="$(printf '%s' "$entry" | jq -r '.expires_at // empty')"
+  now="$(date +%s)"
+
+  if [ -z "$access" ]; then echo "bad|$base has no access_token"; return; fi
+
+  if [ -n "$expires" ] && [ "$expires" -lt "$now" ] 2>/dev/null; then
+    when="$(date -u -d "@$expires" '+%Y-%m-%d %H:%M UTC' 2>/dev/null)"
+    if [ -n "$refresh" ]; then
+      # Whether the refresh token is still accepted cannot be read offline, and
+      # spending it here would consume a single-use token the server process
+      # needs moments later. Report the expiry and let the handshake decide.
+      echo "unknown|$base access token expired $when; refresh token present but unverified"
+    else
+      echo "bad|$base access token expired $when and carries no refresh token"
+    fi
+    return
+  fi
+
+  # An unexpired access token still has to be the right kind of token: a
+  # Cognito ID token authenticates the process and is then rejected by the API.
+  use="$(printf '%s' "$access" \
+    | jq -R 'split(".") | if length == 3 then .[1] | @base64d | fromjson else empty end' 2>/dev/null \
+    | jq -r '.token_use // empty' 2>/dev/null)"
+  reject="$(jq -r --arg s "$server" '(.probes[$s].reject_token_use // [])[]' "$PROBE_CONFIG" 2>/dev/null | tr '\n' ' ')"
+  if [ -n "$use" ] && [[ " $reject " == *" $use "* ]]; then
+    echo "bad|$base access_token is a ${use} token, which the API rejects"; return
+  fi
+
+  echo "ok|seeded credentials valid${refresh:+ (refresh token present)}"
 }
 
 # echoes "<verdict>|<detail>"; verdict is ok, bad or unknown
@@ -132,7 +188,7 @@ run_probe() {
       var="$(probe_field "$server" var)"; tok="${!var:-}"
       if [ -z "$tok" ]; then
         file="$(probe_field "$server" fallback_file)"; file="${file/#\~/$HOME}"
-        if [ -n "$file" ] && [ -s "$file" ]; then echo "unknown|$var unset; using $(basename "$file")"
+        if [ -n "$file" ] && [ -s "$file" ]; then probe_credentials_file "$server" "$file"
         else echo "bad|$var unset and no fallback credentials"; fi
         return
       fi

@@ -61,6 +61,21 @@ only ages. Note that the `access_token` inside a `credentials.json` is a Cognito
 **ID token** — it authenticates the process but the API rejects it, surfacing as
 403 on every call. Preflight checks for both mistakes.
 
+A seeded `credentials.json` is a *decaying* credential, and it decays in two
+independent ways: the access token expires in an hour, and the refresh token
+behind it has its own lifetime that no local check can read. `refreshToken` now
+captures a rotated `refresh_token` from the response (body or `Set-Cookie`) and
+persists it instead of writing the old value back — upstream documents this
+endpoint as not rotating, but if that ever stops being true, re-storing the
+spent token strands the copy in 1Password with no local evidence of why.
+
+Preflight reads that file rather than merely noting it exists, so an expired
+access token, an ID token, or missing refresh token each get named. It stops
+short of calling `/auth/refresh_token`: spending the refresh token to test it
+would consume the value the server process needs seconds later. That leaves one
+honest gap — a `WARN` naming an expired access token means the refresh token is
+**unverified**, not healthy. Only the handshake settles it.
+
 ## Verifying a change
 
 ```sh
